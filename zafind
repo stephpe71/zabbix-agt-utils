@@ -1,0 +1,202 @@
+#!/usr/bin/env bash
+# ==============================================================================================
+# A remote find, based on zabbix agent vfs.dir.get key
+# Essantially offer a more convenient and usual interface
+
+# Implement -notname ?
+
+# ==============================================================================================
+# For test default target
+
+ip=""
+TRACE=""
+ 
+#JQ_OPT="-c"
+JQ_OPT=""
+ 
+# OPtion pour un affichage ls
+# jq -c '.[] | {basename,sizen}'
+JQ_LS_FIELDS="{basename,size}"
+ 
+VERSION="0.5 (20-01-2023)"
+ 
+PROGNAME=$(basename $0)
+ 
+#TRACE=on
+TRACE=""
+ 
+# ==============================================================================================
+# Section fonctions
+
+# +TODO TO BE DEFINED
+function check_prerequisites {
+  :
+}
+ 
+function usage {
+   cat <<EOF
+ 
+     $PROGNAME: usage:
+ 
+     $PROGNAME -ip ip -from topdir [-type f|d|l ] [-mtime -/+ ndays] [-size +10m] [-name pattern]
+ 
+     $PROGNAME -h
+ 
+     find equivalent, based on the new possibilities of zbx.dir.get key in Zabbix Agent (v6.0)
+     -exec is not generally implementable
+ 
+     outputs json: display options (-ls, other) are better left to an external visu utility
+     same goes to -exec grep ... : better left to an external utility
+ 
+EOF
+}
+ 
+function show_version {
+   echo "$PROGNAME: $VERSION"
+}
+ 
+# INput: 10k or 10M or 10G
+# Output: value mult by multiplier
+# NB : the leading + or - is not expected ...
+function get_actual_value {
+ 
+  tmp=$1
+ 
+  value=${tmp%[MGk]*}
+  case $tmp in
+     *k) multiplier=1000 ;;
+     *M) multiplier=1000000 ;;
+     *G) multiplier=1000000000 ;;
+     *)  multiplier=1 ;;
+  esac
+  ((actual_value = value * multiplier))
+ 
+  echo $actual_value
+}
+ 
+# ==============================================================================================
+# Section main ...
+ 
+# Variables de travail pour l'appel zabbix_get
+dir=""
+ 
+regex_incl=""
+regex_excl=""
+ 
+#file,dir,sym,sock,bdev,cdev,fifo". Multiple types must be separated with comma and quoted.
+ 
+types_incl=""
+types_excl=""
+ 
+max_depth=""
+
+min_size=""
+max_size=""
+ 
+min_age=""
+max_age=""
+ 
+regex_excl_dir=""
+ 
+[[ -n $TRACE ]] && set -x
+ 
+while [[ $# -ge 1 ]]
+do
+  opt=$1
+  case $opt in
+ 
+   -h|--help)           usage;          exit 0 ;;
+   -v|--version)        show_version;   exit 0 ;;
+ 
+   -from|-dir) dir=$2;  shift ;;
+ 
+   -host|-ip)  ip=$2;   shift ;;
+ 
+   -exec)
+        echo "-exec option not implemented yet, exiting..."; exit 9 ;;
+ 
+   #file,dir,sym,sock,bdev,cdev,fifo". Multiple types must be separated with comma and quoted.
+   -type)
+        arg=$2
+        case $arg in
+          f) types_incl="file" ;;
+          d) types_incl="dir" ;;
+          l) types_incl="sym" ;;
+          s) types_incl="sock" ;;
+          b) types_incl="bdev" ;;
+          c) types_incl="cdev" ;;
+          ff) types_incl="fifo" ;;
+	  *) echo "${PROGNAME}: unknown option: '$arg'..." 
+        esac
+ 
+        shift ;;
+ 
+   -mtime)
+        arg=$2
+        case $arg in
+          +*) value=${arg##*+}; (( min_age = value * 86400 ));;
+          -*) value=${arg##*-}; (( max_age = value * 86400 ));;
+        esac
+ 
+        shift ;;
+ 
+   -maxdepth)
+        arg=$2; max_depth=$arg
+        shift ;;
+ 
+   -name) # for now ...
+        arg=$2; regex_incl="$2"
+        #echo "rexexp_incl='$regex_incl'"
+        shift ;;
+ 
+   -notname) # for now ...
+        arg=$2; cl="$2"
+        echo "rexexp_excl='$regex_excl'"
+        shift ;;
+
+   -size) # TODO: handle k, M or G suffix  !!
+        arg=$2
+        #echo "option=-size arg=$arg"
+        case $arg in # presumed in k for now
+          +*) tmp=${arg##*+}
+              min_size=$(get_actual_value $tmp);
+              ;;
+          -*) tmp=${arg##*-};
+              max_size=$(get_actual_value $tmp);
+              ;;
+        esac
+        [[ ! -z $TRACE ]] && echo "max_size=$max_size  min_size=$min_size"
+ 
+        shift ;;
+ 
+ 
+   *)   echo "option non supportee : $opt" ;;
+ 
+  esac
+ 
+  shift
+done
+
+#echo "ip=$ip dir=$dir ..."
+[[ -z $ip  ]] && echo "ERROR: il faut préciser la destination (ip/host), sortie..."           && exit 2
+[[ -z $dir ]] && echo "ERROR: il faut préciser le répertoire concerné (ex: /opt)), sortie..." && exit 3
+ 
+zabbix_get 2>&1 >/dev/null
+ 
+rc=$? # 1 if present, 127 otherwise
+case $rc in
+  1)   : ;;
+  127) echo "zabbix_get not available on this host, exiting ..."; exit 8;;
+esac
+ 
+version=$(zabbix_get -s "$ip" -k "agent.version")
+ 
+case $version in
+   [6789].*)    : ;;
+   *)           echo "L'agent distant n'est pas dans une version au minimum egale à 6 (pour la clé vfs.dir.get)..." && exit 4;;
+esac
+ 
+zabbix_get -s "$ip" -k "vfs.dir.get[${dir},${regex_incl},${regex_excl},${types_incl},${types_excl},${max_depth},${min_size},${max_size},${min_age},${max_age},${regex_excl_dir}]"
+ 
+
+
