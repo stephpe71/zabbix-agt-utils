@@ -1,0 +1,166 @@
+#!/usr/bin/ksh93
+# ==========================================================================
+# Littel 'check' script, based on Zabbix Agent (and UserParameters there)
+#
+# As an exercice, by analogy with the check script (ssh based) historically 
+# used by productio 
+#
+# Author : 				Stéphane Perrot 
+# Creation date : 		Mars 2022
+# ==========================================================================
+# Configuration section
+
+CONFIG_FILE=hosts_by_env.ksh
+
+VERSION="1.0 07-02-2023"
+
+# Pour le moment zabbix n'est pas installe sur le pseudo 
+# serveur cx5xxnim01, j'ai detarre ou je pouvais ...
+PATH=$PATH:/export/Software/Zabbix/agent/zabbix_agent/usr/bin:.
+
+# Configurer ici les scripts a utiliser par type de machine
+# la cle correspond aux caracteres 6-8 du nom de machine
+# ['flx']="'.size[,pfree] acoreflx.app.sup0006 acoreflx.wmq.queues acoreflx.xfb.status acoreflx.xfb.tfserror acoreflx.app.state"
+
+#
+# ancienne metrique pour le systeme : system.cpu.util[all,idle,avg1,physical]
+# 
+typeset -A keys_by_hosttype=(	
+
+ # acoreflx.app.sup0006
+ ['flx']="system.cpu.util vfs.fs.size[/data/XIP,pused] system.swap.size[,pused] 
+          acoreflx.wmq.chstatus acoreflx.wmq.queues 
+          acoreflx.xfb.status acoreflx.xfb.tfserror acoreflx.app.state acoreflx.app.slashdump
+          proc.num[,,,password_file_wrapper]" 
+
+ # il faut ajouter la detection de httpd et jboss
+ ['ihm']="system.cpu.util system.swap.size[,pused] proc.num[,,,jboss] proc.num[,,,httpd]" 
+
+ ['cor']="system.cpu.util vfs.fs.size[/data1/XIP,pused] system.swap.size[,pused] core.db2.status proc.num[asncap] core.xfb.status core.xfb.tfserror 
+          core.app.statusglu "
+ ['sip']="system.cpu.util system.swap.size[,pfree] proc.num[asnapply] sip.db2.status"
+ ['pac']="system.cpu.util vfs.fs.size[/data1/XIP1,pused] system.swap.size[,pused] pac.xfb.status pac.xfb.tfserror pac.wmq.chstatus pac.wmq.queues" 
+ ['lda']="system.cpu.util system.swap.size[,pfree] "
+ ['pxy']="system.cpu.util system.swap.size[,pfree] "
+
+)
+
+# en attendant d'utiliser des constantes liberales directement ....
+typeset -A color_by_hosttype=(	
+ ['flx']="46"
+ ['ihm']="47"
+
+ ['cor']="41"
+ ['sip']="44"
+ ['pac']="42"
+ ['lda']="43"
+ ['pxy']="45"
+)
+
+TEST=echo
+TEST=''
+
+# ==========================================================================
+# Section couleurs
+# Repris du (famous) check/superKO
+
+# definittion des codes ASCII
+BEL=$(printf "\007")
+TAB=$(printf "\011")
+ESC=$(printf "\033")
+CSI="${ESC}["
+
+GREEN="${CSI}40m${CSI}32m"
+RED="${CSI}41m${CSI}30m"
+PINK="${CSI}42m${CSI}30m"
+YELLOW="${CSI}43m${CSI}30m"
+BLUE="${CSI}44m${CSI}37m"
+
+BOLD="\033[1m"
+END="\033[0m"
+
+NORMAL="${CSI}39m${CSI}49m"
+
+#${CSI}40m${CSI}32m"
+
+# ==========================================================================
+# Functions section
+
+SCRIPTNAME=$(basename $0)
+
+function usage {
+
+   cat <<EOF
+
+     $SCRIPTNAME: usage:
+
+     $SCRIPTNAME [-e <nom environnement]
+     $SCRIPTNAME [-s <nom machine>]
+     $SCRIPTNAME -h
+     $SCRIPTNAME -v
+
+     check global base sur l'agent zabbix
+     la liste des machines est configuree dans 
+     $CONFIG_FILE
+
+EOF
+}
+
+# -----------------------------------------------------------------------------
+function process_host {
+
+  hostname=$1
+
+  echo "# ----------------------------------------------------------------------------------------"
+  # fix comme dans suffixe/prefixe
+  fix=$(echo $hostname | cut -c6-8)
+
+  keys=${keys_by_hosttype["$fix"]}
+  color=${color_by_hosttype["$fix"]}
+
+  echo "# host ${CSI}${color}m${CSI}30m${hostname}${NORMAL} of type $fix"
+
+  for key in $keys
+  do
+    printf "${BOLD}%-35s:${END} " $key 
+    $TEST zabbix_get -s $hostname -k "$key"
+  done
+
+  echo
+}
+
+# ==========================================================================
+# Main section
+envi="eukal2"
+
+while getopts hve:s: cmdopt
+do
+ case ${cmdopt} in
+
+  h)  usage && exit 0;;
+  v)  echo "$SCRIPTNAME version $VERSION" && exit 0 ;;
+  e)  envi=${OPTARG} ;;
+  s)  hostname=${OPTARG} ;;
+
+  ?) echo "l'option '${OPTARG}' est invalide." && exit 1 ;;
+
+ esac
+done
+
+[[ ! -r $CONFIG_FILE ]]  && echo "=> fichier de configuration '$CONFIG_FILE' non trouve, sortie ..." && exit 5
+
+. $CONFIG_FILE
+
+if [[ -n $hostname ]]; then
+  process_host $hostname
+else
+  echo
+  echo "# Lancement du check/zabbix pour l'environnement '$envi' ... "
+  echo
+  for hostname in ${hosts_by_env["${envi}"]}
+  do
+    process_host $hostname
+  done
+fi
+
+
