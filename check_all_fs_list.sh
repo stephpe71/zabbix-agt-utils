@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
+# A little script to generate an syntactic array
+# of values (here : fs occation) on a buch of hosts
 
-# 1p 
-# 
+# Configuration
+FS_LIST="/ /boot /home /var /var/log /opt"
+
+# Main
 echo "["
 #for ip in $(cat liste.txt | grep -v '^$' | awk '{print $2}')
 
@@ -16,7 +20,7 @@ do
    [[ $rc -gt 0 ]] && break
 
    printf "{\"hostname\":\"${hn}\""
-   for fs in / /boot /home /var /var/log /opt
+   for fs in $FS_LIST
    do
       #echo -e "${fs}: \c"
       value=$(zabbix_get -t 1 -s $ip -k "vfs.fs.size[${fs},pused]" 2>/dev/null)
