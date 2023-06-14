@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# sh because on alpine it's not bash (but ash from busybox)
+# should be named zatop (Zabbix Agt Top)
+# but zztop was overly top cool
+
+# ==============================================================================
+# Champs intéressants (btop)
+# pid programc Command User MemB (avec suffix) Cpu%
+
+# ==============================================================================
+# TODO
+# 1) put color in mlr
+# 2) test not filter : | not in the filter clause
+
+# ==============================================================================
+# Variables
+
+FIELDS="pid,state,user,threads,pmem,cputime_user,cputime_system,name"
+SORT_FIELD="threads"
+DELAY=3
+
+HOST=localhost
+HOST=127.0.0.1
+KEY=proc.get
+
+TIMEOUT=1
+
+DEBUG=""
+
+VERSION="0.3 09-05-2023"
+
+MLR=""
+
+# ==============================================================================
+# see --list-color-codes or -names
+# A partir de la version 6, Pb sur fedora on est en 5.10
+export MLR_KEY_COLOR=208
+export MLR_VALUE_COLOR=33
+
+# ==============================================================================
+#
+zabbix_get -t $TIMEOUT -s $HOST -k agent.ping
+[[ $? -ne 0 ]] && echo "agent.ping: error" && exit 2
+
+version=$(zabbix_get -t $TIMEOUT -s $HOST -k agent.version)
+
+echo "# agent version=$version"
+case $version in
+    [6].[246]*)   : ;;
+    [7-9].*)      : ;;
+    *)		echo "zabbix agent version: too old version (key 'agent.proc' not supported)" && exit 3 ;;
+esac
+
+while true
+do
+    clear
+
+    #zabbix_get -s $HOST -k $KEY | jq -M ".|sort_by(.pmem)|.[] |{${FIELDS}}" | mlr --j2c cat
+    #zabbix_get -s $HOST -k proc.get | jq  '.[]| select(.user=="sperrot")'
+    #zabbix_get -s $HOST -k $KEY | jq -c ".|sort_by(.${SORT_FIELD})|.[]|{${FIELDS}}"
+
+    # | mlr --j2c cat
+    #zabbix_get -s $HOST -k $KEY | jq -c ". | sort_by(.${SORT_FIELD}) | .[] | select(.user==\"sperrot\") | {${FIELDS}} " | mlr -C --fs ';' --j2c cat
+    zabbix_get -s $HOST -k $KEY | jq -c ". | sort_by(.${SORT_FIELD}) | .[] | select(.user==\"sperrot\") | {${FIELDS}} "
+    #zabbix_get -s $HOST -k $KEY | jq -c ". | sort_by(.${SORT_FIELD}) | .[] | select(.state==\"idel\"|not ) | {${FIELDS}} " | mlr -C --fs ';' --j2c cat
+
+    #zabbix_get -s $HOST -k $KEY | jq -c ". | sort_by(.${SORT_FIELD}) | .[] | select(.state ==\"sleeping\"|not ) | {${FIELDS}} " | mlr -C --fs ';' --j2c cat
+
+    #echo "## Top Processes on $HOST ##"
+    #exit
+    sleep $DELAY
+done
+
+
+
