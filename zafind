@@ -1,38 +1,40 @@
 #!/usr/bin/env bash
 # ==============================================================================================
 # A remote find, based on zabbix agent vfs.dir.get key
-# Essantially offer a more convenient and usual interface
-
+# This script essentially offer a more convenient and usual interface to this key capability
+# 
+# A typical scenario is to provide a way to investigate remote files, without having access
+# to the remote host (and without 'superpower' such as allowed system.run)
+#
+# Output is voluntarily kept as json (the output of the vfs.dir.get key), to be pretty 
+# printed by tools such as jq, mlr, ...
+# 
+# Author : Stéphane Perrot 	(C) 2023 
+#
+# TODO:
 # Implement -notname ?
-
+# 
 # ==============================================================================================
 # For test default target
 
 ip=""
 TRACE=""
  
-#JQ_OPT="-c"
-JQ_OPT=""
- 
-# OPtion pour un affichage ls
-# jq -c '.[] | {basename,sizen}'
-JQ_LS_FIELDS="{basename,size}"
- 
-VERSION="0.5 (20-01-2023)"
+VERSION="0.6 (11-07-2023)"
  
 PROGNAME=$(basename $0)
  
 #TRACE=on
 TRACE=""
- 
+
 # ==============================================================================================
-# Section fonctions
+# Section fonctions ...
 
 # +TODO TO BE DEFINED
 function check_prerequisites {
   :
 }
- 
+
 function usage {
    cat <<EOF
  
@@ -55,7 +57,7 @@ function show_version {
    echo "$PROGNAME: $VERSION"
 }
  
-# INput: 10k or 10M or 10G
+# Input: 10k or 10M or 10G
 # Output: value mult by multiplier
 # NB : the leading + or - is not expected ...
 function get_actual_value {
@@ -73,7 +75,7 @@ function get_actual_value {
  
   echo $actual_value
 }
- 
+
 # ==============================================================================================
 # Section main ...
  
@@ -105,12 +107,12 @@ do
   opt=$1
   case $opt in
  
-   -h|--help)           usage;          exit 0 ;;
-   -v|--version)        show_version;   exit 0 ;;
+   -h|--help)       usage;          exit 0 ;;
+   -v|--version)    show_version;   exit 0 ;;
  
-   -from|-dir) dir=$2;  shift ;;
+   -from|-dir) 		dir=$2;  		shift ;;
  
-   -host|-ip)  ip=$2;   shift ;;
+   -host|-ip)  		ip=$2;   		shift ;;
  
    -exec)
         echo "-exec option not implemented yet, exiting..."; exit 9 ;;
@@ -119,13 +121,13 @@ do
    -type)
         arg=$2
         case $arg in
-          f) types_incl="file" ;;
-          d) types_incl="dir" ;;
-          l) types_incl="sym" ;;
-          s) types_incl="sock" ;;
-          b) types_incl="bdev" ;;
-          c) types_incl="cdev" ;;
-          ff) types_incl="fifo" ;;
+          f) 	types_incl="file" ;;
+          d) 	types_incl="dir" ;;
+          l) 	types_incl="sym" ;;
+          s) 	types_incl="sock" ;;
+          b) 	types_incl="bdev" ;;
+          c) 	types_incl="cdev" ;;
+          ff) 	types_incl="fifo" ;;
 	  *) echo "${PROGNAME}: unknown option: '$arg'..." 
         esac
  
@@ -169,8 +171,7 @@ do
  
         shift ;;
  
- 
-   *)   echo "option non supportee : $opt" ;;
+    *)   echo "option non supportee : $opt" ;;
  
   esac
  
@@ -178,8 +179,8 @@ do
 done
 
 #echo "ip=$ip dir=$dir ..."
-[[ -z $ip  ]] && echo "ERROR: il faut préciser la destination (ip/host), sortie..."           && exit 2
-[[ -z $dir ]] && echo "ERROR: il faut préciser le répertoire concerné (ex: /opt)), sortie..." && exit 3
+[[ -z $ip  ]] && echo "ERROR: target (ip-or-host) must be specified, exiting..."            && exit 2
+[[ -z $dir ]] && echo "ERROR: top directory must be specified (ex: -dir /opt)), exiting..." && exit 3
  
 zabbix_get 2>&1 >/dev/null
  
@@ -193,10 +194,9 @@ version=$(zabbix_get -s "$ip" -k "agent.version")
  
 case $version in
    [6789].*)    : ;;
-   *)           echo "L'agent distant n'est pas dans une version au minimum egale à 6 (pour la clé vfs.dir.get)..." && exit 4;;
+   *)           echo "Remote agent is not sufficiently recent (actual version: ${version}, minimum version: v6.0)..." && exit 4;;
 esac
- 
+
 zabbix_get -s "$ip" -k "vfs.dir.get[${dir},${regex_incl},${regex_excl},${types_incl},${types_excl},${max_depth},${min_size},${max_size},${min_age},${max_age},${regex_excl_dir}]"
  
-
 
