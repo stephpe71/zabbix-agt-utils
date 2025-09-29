@@ -1,36 +1,76 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# sh because on alpine it's not bash (but ash from busybox)
-# should be named zatop (Zabbix Agt Top)
-# but zztop was overly top cool
-
+# bash because on alpine sh is not bash (but ash from busybox)
+# should be named zbxtop (Zabbix Agt Top)
+# but zztop was overly top cool !
 # ==============================================================================
 # Champs intéressants (btop)
-# pid programc Command User MemB (avec suffix) Cpu%
+# pid program Command User MemB (avec suffix) Cpu%
 
+# NOTES: many many new fields available in Zabbix Agt v7.4 !!
 # ==============================================================================
 # TODO
-# 1) put color in mlr
-# 2) test not filter : | not in the filter clause
-
+#
+# - DONE colored header
+# - DONE recup list of most recent fields in proc.get
+# - DONE Détection du type d'os distant
+# - DONE Faire une lecture des options avec getops !!!
+# - 
+# - Faire un top 'one shot'
+# - Mettre des valeurs d'alertes pour certaines colonnes (surtout les %) ?? pas pratique
+# - reprendre un filtre au lieu d'afficher tous les procs -> nouveau top
+# - au lieu de faire tail ou un head, faire un défilé (avec des touches)
+# 
 # ==============================================================================
-# Variables
+# Section CONFIGURATION
+#
+# all linux proc.get fields, as of v7.4 
+# pid ppid name cmdline user group uid gid vsize pmem rss data exe hwm lck lib
+# peak pin pte size stk swap cputime_user cputime_system state ctx_switches
+# threads page_faults pss
 
-FIELDS="pid,state,user,threads,pmem,cputime_user,cputime_system,name"
-SORT_FIELD="threads"
+DEFAULT_FIELDS="pid,ppid,user,state,cputime_user,cputime_system,name"
+
+LINUX_FIELDS="pid,user,state,pmem,vsize,rss,cputime_user,cputime_system,name"
+
+# handles page_faults may be interesting as well...
+WINDOWS_FIELDS="pid,user,state,vresident,wkset,cputime_user,cputime_system,name"
+
+# Fields for BSD are somewhat different
+# at least from 7.4 on
+# some are for FreeBSD only, other OpenBSD only
+BSD_FIELDS="pid,ppid,jid,jname,name,cmdline,user,group,uid,gid,vsize,pmem,rss,size,tsize,dsize,ssize,cputime_user,cputime_system"
+BSD_FIELDS_ADD="state,ctx_switches,threads,page_faults,fds,swap,io_read_op,io_write_op"
+
+FIELDS="$LINUX_FIELDS"
+
 DELAY=3
 
-HOST=localhost
-HOST=127.0.0.1
+HOST=${1:-127.0.0.1}
+SORT_FIELD=${2:-pmem}
+NLINES=${3:-25}
+
 KEY=proc.get
 
-TIMEOUT=1
-
-DEBUG=""
-
-VERSION="0.3 09-05-2023"
+VERSION="1.0pre (29-09-2025)"
 
 MLR=""
+TIMEOUT=1
+DEBUG=""
+DEBUG="1"
+
+# other interesting values are simple pipe 
+BORDER_STYLE=fancy_grid
+BORDER_STYLE=pipe
+
+HEADER_COLOR=31
+NORMAL_COLOR=30
+WARN_COLOR=30
+ERROR_COLOR=31
+
+PROGNAME=$(basename $0)
+
+HDTL=tail
 
 # ==============================================================================
 # see --list-color-codes or -names
@@ -39,35 +79,120 @@ export MLR_KEY_COLOR=208
 export MLR_VALUE_COLOR=33
 
 # ==============================================================================
-#
-zabbix_get -t $TIMEOUT -s $HOST -k agent.ping
-[[ $? -ne 0 ]] && echo "agent.ping: error" && exit 2
+# Section FUNCTIONS
+function usage {
 
-version=$(zabbix_get -t $TIMEOUT -s $HOST -k agent.version)
+    cat <<EOF
 
-echo "# agent version=$version"
-case $version in
+    $PROGNAME: usage:
+
+    $PROGNAME display a 'top-like' view, displaying infos gathered
+    via the Zabbix agent (1 ou 2)
+
+    zabbix_agent has to be installed on the target host, and
+    it must be autorized to talk (passive mode) to the node
+    yoou're running $PROGNAME from...
+
+EOF
+}
+
+function colored {
+    local text="$1"
+    local color=${2:-31}
+
+    printf "\033[1;${color}m${text}\033[0m"    
+}
+
+function display_colors {
+    for color in $(seq 30 37); do
+	echo $color:$(colored "foobar" $color)
+    done
+}
+
+# ==============================================================================
+# Section MAIN
+# FIXME: put in a getopt while loop
+
+# [[ $1 = "-h" ]] && usage && exit 0
+# [[ $1 = "-V" ]] && echo "$PROGNAME: $VERSION" && exit 0
+
+# Il faudrait définir les options
+# idem zabbix_get
+# border style
+#local flag OPTIND=1 OPTARG="" OPTERR=0
+while getopts "hVf:s:n:b:" flag "$@"; do
+    case $flag in
+
+	h) usage && exit 0 ;;
+	V) echo "$PROGNAME: $VERSION" && exit 0 ;;
+
+	b) BORDER_STYLE=$OPTARG ;;
+	s) HOST=$OPTARG ;;
+        f) SORT_FIELD=$OPTARG ;;
+        n) NLINES=$OPTARG ;;
+
+	*) exit 1 ;;
+
+    esac
+done
+
+#display_colors 
+#exit 0
+
+# Does agent respond on specified target?
+zabbix_get -t $TIMEOUT -s $HOST -k agent.ping >/dev/null
+[[ $? -ne 0 ]] && echo "$PROGNAME[agent.ping]: error: agent did respond on time, exiting..." && exit 2
+
+# Does agent support proc.get key? (only recent versions)
+agent_version=$(zabbix_get -t $TIMEOUT -s $HOST -k agent.version)
+
+[[ ! -z $DEBUG ]] && echo "agent_version='$agent_version'"
+case $agent_version in
     [6].[246]*)   : ;;
     [7-9].*)      : ;;
-    *)		echo "zabbix agent version: too old version (key 'agent.proc' not supported)" && exit 3 ;;
+    *)		  echo "zabbix agent version: too old version (key 'agent.proc' not supported)" && exit 3 ;;
 esac
 
+# Do not use system.sw.os, not defined on FreeBSD agent
+os_name=$(zabbix_get -t $TIMEOUT -s $HOST -k system.uname | awk '{print $1}')
+[[ ! -z $DEBUG ]] && echo "os_name='$os_name'"
+
+case $os_name in
+    Linux)	echo Linux target detected ;   FIELDS="$LINUX_FIELDS"   ;;
+    Windows)	echo Windows target detected ; FIELDS="$WINDOWS_FIELDS" ;; 
+    *BSD*)	echo BSD target detected ;     FIELDS="$BSD_FIELDS" ;; # checked
+
+    *)		echo 'System could not be inferred, defauting to common fields...'
+		FIELDS="$DEFAULT_FIELDS" ;;
+esac
+
+[[ ! -z $DEBUG ]] && echo "# FIELDS=$FIELDS"
+
+if ! echo $FIELDS | grep -q $SORT_FIELD; then
+    echo "Sort criterion '$SORT_FIELD' not found in FIELDS, defaulting to pid"
+    #SORT_FIELD=pid
+fi
+
+[[ ! -z $DEBUG ]] && echo "SORT_FIELD='$SORT_FIELD'"
+
+# ==============================================================================
 while true
 do
     clear
+    
+    # From bash prompt 31 is salmon, 37 is brilliant & 36 is cyan
+    #"\033]0;%s@%s:%s\007"
+    echo -e "\033[1;${HEADER_COLOR}m## Getting processes data from '$HOST' (via proc.get), sorting by '${SORT_FIELD}'...\033[0m"
 
-    #zabbix_get -s $HOST -k $KEY | jq -M ".|sort_by(.pmem)|.[] |{${FIELDS}}" | mlr --j2c cat
-    #zabbix_get -s $HOST -k proc.get | jq  '.[]| select(.user=="sperrot")'
-    #zabbix_get -s $HOST -k $KEY | jq -c ".|sort_by(.${SORT_FIELD})|.[]|{${FIELDS}}"
+    # This is OK
+    #zabbix_get -s $HOST -k $KEY | jq -c ". | sort_by(.${SORT_FIELD}) | .[] | {${FIELDS}} "
 
-    # | mlr --j2c cat
-    #zabbix_get -s $HOST -k $KEY | jq -c ". | sort_by(.${SORT_FIELD}) | .[] | select(.user==\"sperrot\") | {${FIELDS}} " | mlr -C --fs ';' --j2c cat
-    zabbix_get -s $HOST -k $KEY | jq -c ". | sort_by(.${SORT_FIELD}) | .[] | select(.user==\"sperrot\") | {${FIELDS}} "
-    #zabbix_get -s $HOST -k $KEY | jq -c ". | sort_by(.${SORT_FIELD}) | .[] | select(.state==\"idel\"|not ) | {${FIELDS}} " | mlr -C --fs ';' --j2c cat
+    # Sauf que c'est en pipe, où insérer une colorisation ?
+    # another interesting jq function is ".[] | select(.foo == value)"
+    zabbix_get -s $HOST -k $KEY | jq -c ". | sort_by(.${SORT_FIELD}) | .[] | {${FIELDS}} " \
+     	| $HDTL -${NLINES} | mlr --j2t cat \
+        | tabulate -1 -f $BORDER_STYLE
 
-    #zabbix_get -s $HOST -k $KEY | jq -c ". | sort_by(.${SORT_FIELD}) | .[] | select(.state ==\"sleeping\"|not ) | {${FIELDS}} " | mlr -C --fs ';' --j2c cat
-
-    #echo "## Top Processes on $HOST ##"
     #exit
     sleep $DELAY
 done
