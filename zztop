@@ -15,12 +15,17 @@
 # - DONE recup list of most recent fields in proc.get
 # - DONE Détection du type d'os distant
 # - DONE Faire une lecture des options avec getops !!!
-# - 
-# - Faire un top 'one shot'
+# - DONE Remplir la fonction usage
+# - DONE Définir DATADIR
+# - DONE Rajouter option oneshot
+# - rajouter options -1 shot, -D datadir , -t DEBUG
 # - Mettre des valeurs d'alertes pour certaines colonnes (surtout les %) ?? pas pratique
 # - reprendre un filtre au lieu d'afficher tous les procs -> nouveau top
 # - au lieu de faire tail ou un head, faire un défilé (avec des touches)
-# 
+
+# BUGS
+# - not suitable for following of CPU bound processes
+
 # ==============================================================================
 # Section CONFIGURATION
 #
@@ -52,9 +57,8 @@ NLINES=${3:-25}
 
 KEY=proc.get
 
-VERSION="1.0pre (29-09-2025)"
+VERSION="1.0pre (30-09-2025)"
 
-MLR=""
 TIMEOUT=1
 DEBUG=""
 DEBUG="1"
@@ -72,6 +76,9 @@ PROGNAME=$(basename $0)
 
 HDTL=tail
 
+DATADIR=/data/gnuplot/zztop
+DATADIR=.
+
 # ==============================================================================
 # see --list-color-codes or -names
 # A partir de la version 6, Pb sur fedora on est en 5.10
@@ -87,11 +94,24 @@ function usage {
     $PROGNAME: usage:
 
     $PROGNAME display a 'top-like' view, displaying infos gathered
-    via the Zabbix agent (1 ou 2)
+    via the Zabbix agent (1 ou 2 variants)
 
     zabbix_agent has to be installed on the target host, and
     it must be autorized to talk (passive mode) to the node
-    yoou're running $PROGNAME from...
+    you're running $PROGNAME from...
+
+    Options:
+
+	-h: show this usage message and exit
+	-V; show version and exit
+
+	-b) set border style (one of tabulate supoorted border style)
+        -c) set SORT criterion
+        -d) set delay between refreshs
+	-s) set IP/HOSTNAME to use 
+        -n) show N tail or header lines
+        -p) use head or tail to filter N lines of output
+        -r) follow (register) giveb proc id
 
 EOF
 }
@@ -112,27 +132,26 @@ function display_colors {
 # ==============================================================================
 # Section MAIN
 # FIXME: put in a getopt while loop
-
-# [[ $1 = "-h" ]] && usage && exit 0
-# [[ $1 = "-V" ]] && echo "$PROGNAME: $VERSION" && exit 0
-
-# Il faudrait définir les options
-# idem zabbix_get
-# border style
+#set -x
 #local flag OPTIND=1 OPTARG="" OPTERR=0
-while getopts "hVf:s:n:b:" flag "$@"; do
+while getopts "hVc:s:n:b:d:f:p:r:1" flag "$@"; do
     case $flag in
 
 	h) usage && exit 0 ;;
 	V) echo "$PROGNAME: $VERSION" && exit 0 ;;
 
 	b) BORDER_STYLE=$OPTARG ;;
-	s) HOST=$OPTARG ;;
-        f) SORT_FIELD=$OPTARG ;;
+        c) SORT_FIELD=$OPTARG ;;
+        d) DELAY=$OPTARG ;;
         n) NLINES=$OPTARG ;;
+        p) HDTL=$OPTARG ;;
+        r) REGPID=$OPTARG ;;
+	s) HOST=$OPTARG ;;
+
+	1) ONESHOT=1 ;;
 
 	*) exit 1 ;;
-
+	
     esac
 done
 
@@ -174,12 +193,14 @@ if ! echo $FIELDS | grep -q $SORT_FIELD; then
 fi
 
 [[ ! -z $DEBUG ]] && echo "SORT_FIELD='$SORT_FIELD'"
+[[ ! -z $DEBUG ]] && echo "REGPID='$REGPID'"
 
+#set -x
 # ==============================================================================
 while true
 do
     clear
-    
+    #set -x
     # From bash prompt 31 is salmon, 37 is brilliant & 36 is cyan
     #"\033]0;%s@%s:%s\007"
     echo -e "\033[1;${HEADER_COLOR}m## Getting processes data from '$HOST' (via proc.get), sorting by '${SORT_FIELD}'...\033[0m"
@@ -189,13 +210,25 @@ do
 
     # Sauf que c'est en pipe, où insérer une colorisation ?
     # another interesting jq function is ".[] | select(.foo == value)"
-    zabbix_get -s $HOST -k $KEY | jq -c ". | sort_by(.${SORT_FIELD}) | .[] | {${FIELDS}} " \
-     	| $HDTL -${NLINES} | mlr --j2t cat \
-        | tabulate -1 -f $BORDER_STYLE
 
-    #exit
+    zabbix_get -s $HOST -k $KEY | jq -c ". | sort_by(.${SORT_FIELD}) | .[] | {${FIELDS}} " > tmp.json
+    cat tmp.json | $HDTL -${NLINES} | mlr --j2t cat \
+	   | tabulate -1 -f $BORDER_STYLE
+
+    [[ ! -z $ONESHOT ]] && exit 0
+    #echo REGPID=$REGPID
+    
+    if [[ ! -z $REGPID ]]; then
+	ts=$(date +%s)
+
+	/bin/echo -e "${ts} \c" >> out.dat
+	cat tmp.json | jq -rMs ".[] | select(.pid == ${REGPID})" | mlr --j2t cat | tail -1 >> out.dat
+    fi
+    
     sleep $DELAY
+
 done
+
 
 
 
