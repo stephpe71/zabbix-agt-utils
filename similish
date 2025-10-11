@@ -1,0 +1,185 @@
+#!/usr/bin/env zsh
+#!/usr/bin/env bash
+# ==============================================================================
+# bash read function does not behave the way I'm used to
+# A similish based on zabbix agent
+
+# This is more a Proof of Concept for now than a reliable
+# 
+# ==============================================================================
+# TODO
+# 
+# 
+# BUGS
+# - maintain coherency for CWD between 'standard' commands
+#   and those run through system.run keys
+# 
+#
+
+# ==============================================================================
+# Section CONFIGURATION
+#
+#set -x
+
+HOST=${1:-127.0.0.1}
+
+VERSION="0.2 (11-10-2025)"
+
+DEBUG="1"
+DEBUG=""
+
+TIMEOUT=5
+
+PROGNAME=$(basename $0)
+
+PROMPT="SimiliSH> "
+
+# Set to null if system.run disact
+#EXTENDED_COMMANDS=""
+EXTENDED_COMMANDS=true
+
+# Let's from there
+CWD="/tmp"
+
+# ==============================================================================
+# Section FUNCTIONS
+
+function usage {
+
+    cat <<EOF
+
+    $PROGNAME: usage:
+
+    $PROGNAME is a simili shell based on zabbix agent variious keys ...
+
+    Options:
+
+	-h: show this usage message and exit
+	-V; show version and exit
+
+EOF
+}
+
+# TBD k
+function cleanup {
+    rm -f tmp.json out.dat
+}
+
+function welcome {
+    echo
+    echo "### WELCOME TO SIMILISH ###"
+    echo "### A shell based on zabbix agent capabilities###"
+    echo
+}
+
+function help {
+    echo
+    echo "# Some commands"
+    echo " pwd, cd, ls, cat"
+    echo
+}
+
+# ==============================================================================
+#  MAIN
+# FIXME: put in a getopt while loop
+#set -x
+#local flag OPTIND=1 OPTARG="" OPTERR=0
+while getopts "hV" flag "$@"; do
+
+    case $flag in
+
+	h) usage && exit 0 ;;
+	V) echo "$PROGNAME: $VERSION" && exit 0 ;;
+
+	*) exit 1 ;;
+	
+    esac
+
+done
+
+# Does agent respond on specified target?
+zabbix_get -t $TIMEOUT -s $HOST -k agent.ping >/dev/null
+[[ $? -ne 0 ]] && echo "$PROGNAME[agent.ping]: error: agent did respond on time, exiting..." && exit 2
+
+# Does agent support proc.get key? (only recent versions)
+agent_version=$(zabbix_get -t $TIMEOUT -s $HOST -k agent.version)
+[[ ! -z $DEBUG ]] && echo "agent_version='$agent_version'"
+case $agent_version in
+
+    [6].[246]*)   : ;;
+    [7-9].*)      : ;;
+    *)		  echo "zabbix agent version: too old version (key 'proc.get' not supported)" && exit 3 ;;
+esac
+
+# Does agent support proc.get key? (only recent versions)
+zabbix_get -t $TIMEOUT -s $HOST -k "system.run[date]" >/dev/null
+if [[ $? -ne 0 ]]; then
+    echo "WARNING: zabbix agent does not appear to support 'system.run' key, extended functionalities will be disabled... " && EXTENDED_COMMANDS=""
+else
+    echo
+    echo "> zabbix agent appears to support 'system.run' key, extended cmds are enabled... " && EXTENDED_COMMANDS="true"
+    echo
+fi
+
+# ==============================================================================
+current_rc=0
+
+while true
+do
+    echo -e "$PROMPT\c"
+    read input
+    #read
+
+    [[ -n $DEBUG ]] && echo "input='$input'"
+    echo $input | read cmd arg1 arg2 arg3 arg4
+    [[ -n $DEBUG ]] && echo "cmd='$cmd' arg1='$arg1' arg2='$arg2' arg3='$arg3'"
+    
+    # Better used with implicit $* arguments?
+    case "$cmd" in
+
+	# Fixme: special handling of /
+	cd)	case $arg1 in
+		    /*) CWD=$arg1 ;;
+		     *) CWD=$CWD/$arg1 ;; #FIXME: add check of existence !!
+		esac
+		CWD=$(echo $CWD | perl -pe 's@(/+)@/@g')
+	        echo $CWD
+		;;
+	
+	pwd)	echo $CWD ;;
+
+	# -rw-r--r-- 1 sperrot sperrot  352 10 oct.  15:19 IDEES
+	# -rwxr-xr-x 1 sperrot sperrot 2,4K 11 oc	
+	ls)
+	    zabbix_get -s $HOST -k "vfs.dir.get[$CWD]" | jq -cr '.[] | .basename' ;;
+
+	ll) 
+	    zabbix_get -s $HOST -k "vfs.dir.get[$CWD]" | jq -cMr '.[] | {permissions,user,group,basename} ';;
+
+	cat) pathname=$CWD/$arg1
+	    zabbix_get -s $HOST -k "vfs.file.contents[$pathname]"
+            ;;
+	cksum|md5sum) pathname=$CWD/$arg1
+	    zabbix_get -s $HOST -k "vfs.file.${cmd}[$pathname]"
+            ;;
+	grep) # FIXME: should handle grep options, if possible
+	    regexp="$arg1"
+	    pathname=$CWD/$arg2
+	    zabbix_get -s $HOST -k "vfs.file.regexp[$pathname,$regexp]"
+	    ;;
+	exit|quit)	exit $current_rc ;;
+
+	*)   if [[ ! -z $EXTENDED_COMMANDS ]]; then
+	       zabbix_get -s $HOST -k "system.run[$cmd $arg1 $arg2 $arg3 $arg4]"
+	     else
+		 echo "Unknown command: '$cmd'"
+	     fi ;;
+    esac
+done
+
+[[ -z $DEBUG ]] && cleanup
+
+exit 0
+
+
+
