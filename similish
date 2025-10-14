@@ -18,7 +18,10 @@
 # - handle a larger number of arguments than 4
 #
 # - colorize in general => colorlib.sh
-
+# - use a $HOME/.zashrc ?
+#
+# TODO more difficult, maybe
+# - edit a file on remote system ??
 #
 # BUGS
 # - FIXED put a maxdepth param in vdg commands
@@ -27,7 +30,6 @@
 # - MAINTAIN COHERENCY for CWD between standard and extended commands
 # - find a way to split arguments with bash 'read' cmd
 #
-
 # ==============================================================================
 # Section CONFIGURATION
 #
@@ -36,7 +38,7 @@
 
 HOST=${1:-127.0.0.1}
 
-VERSION="0.3a (13-10-2025 morning)"
+VERSION="0.4a (14-10-2025 morning)"
 
 DEBUG="1"
 DEBUG=""
@@ -51,7 +53,6 @@ PROGRAM_NAME="SimiliSH"
 PROGRAM_NAME="ZaSH"
 
 PROMPT="${PROGRAM_NAME}> "
-
 
 # Set to null if system.run disact
 #EXTENDED_COMMANDS=""
@@ -71,23 +72,25 @@ CWD="/tmp"
 # "gid": 1000,
 # "size": 0,
 
-JQ_LL_EXTRACTOR="{perms:.permissions,user:.user,group:.group,size:.size,datetime:.time.change,name:.basename}"
+JQ_LL_EXTRACTOR="{type:.type, perms:.permissions, user:.user, group:.group, size:.size, datetime:.time.change, name:.basename}"
 
 # ==============================================================================
 # Section FUNCTIONS
 
 function usage {
-
     cat <<EOF
 
     $SCRIPTNAME: usage:
 
-    $SCRIPTNAME is a simili shell based on zabbix agent variious keys ...
+    $SCRIPTNAME is a minimal read only shell (sort of) based on zabbix agent
+    various keys (vfs.dir.get, vfs.file.*, system.run if avail., etc ...)
+
+    Not implemented: pipes, completion, modifications, awk, sed ...
 
     Options:
 
 	-h: show this usage message and exit
-	-V; show version and exit
+	-V: show version and exit
 
 EOF
 }
@@ -97,7 +100,7 @@ function cleanup {
     rm -f tmp.json out.dat
 }
 
-function welcome {
+function display_welcome_message {
 
     local welcome_string="WELCOME TO ${PROGRAM_NAME}"
 
@@ -114,10 +117,14 @@ function welcome {
 }
 
 function help {
-    echo
-    echo "# Some commands:"
-    echo " pwd, cd, ls, cat"
-    echo
+    cat<<EOF
+    # Some commands:
+     pwd: display current directory
+     cd:  change current directory
+     ls:  display content of current directory
+     cat: display content of given file
+     {ck|md5}sum: calculate the given checksum of file
+EOF
 }
 
 # ==============================================================================
@@ -128,17 +135,14 @@ function help {
 
 source "colorlib.sh"
 
-while getopts "hV" flag "$@"; do
-
+while getopts "hV" flag "$@"
+do
     case $flag in
-
 	h) usage && exit 0 ;;
 	V) echo "$SCRIPTNAME: $VERSION" && exit 0 ;;
 
 	*) exit 1 ;;
-	
     esac
-
 done
 
 # Does agent respond on specified target?
@@ -161,20 +165,17 @@ if [[ $? -ne 0 ]]; then
     echo "WARNING: zabbix agent does not appear to support 'system.run' key, extended functionalities will be disabled... "
     EXTENDED_COMMANDS=""
 else
-    : # this message is replaced by note in welcome message
-    # echo
-    # echo "> zabbix agent appears to support 'system.run' key, extended cmds are enabled... " && EXTENDED_COMMANDS="true"
-    # echo
+    :
 fi
 
 # ==============================================================================
 current_rc=0
 
-welcome
+display_welcome_message
 
 while true
 do
-    echo -e "$PROMPT\c"
+    echo -e "$(colored $PROMPT $BRIGHT)\c"
     read input
     #read
 
@@ -185,7 +186,6 @@ do
     # Better used with implicit $* arguments?
     case "$cmd" in
 
-	# Fixme: special handling of /
 	pwd)	echo $CWD ;;
 
 	cd)	case $arg1 in
@@ -231,6 +231,8 @@ do
 	hostname)	zabbix_get -s $HOST -k "system.hostname" ;;
 	uptime)		zabbix_get -s $HOST -k "system.uptime" ;;
 
+        version)	echo "$PROGRAM_NAME version $VERSION" ;;
+
 	exit|quit)	exit $current_rc ;;
 
 	help)	help ;;
@@ -247,7 +249,8 @@ done
 
 [[ -z $DEBUG ]] && cleanup
 
-exit 0
+exit $current_rc
+
 
 
 
