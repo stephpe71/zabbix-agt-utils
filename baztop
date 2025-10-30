@@ -4,7 +4,7 @@
 # Author:		Stephane Perrot
 # Initial version:	August 2023
 # Current version:	October 2025
-# 
+#
 # Heavily based on bashtop by Aristocratos (jakob@qvantnet.com)
 #
 #    Licensed under the Apache License, Version 2.0 (the "License");
@@ -39,12 +39,12 @@ DEBUG=""
 
 #* Fail if running on unsupported OS
 case "$(uname -s)" in
-    Linux*)	system=Linux;;
-    *BSD)	system=BSD;;
-    Darwin*)	system=MacOS;;
+    Linux*)     system=Linux;;
+    *BSD)       system=BSD;;
+    Darwin*)    system=MacOS;;
 
     CYGWIN*)    system=Cygwin;;
-    MINGW*)	system=MinGw;;
+    MINGW*)     system=MinGw;;
 
     *)	        system="Other";;
 esac
@@ -101,7 +101,7 @@ banner=(
 "██████╔╝██║  ██║███████╗   ██║   ╚██████╔╝██║     "
 "╚═════╝ ╚═╝  ╚═╝╚══════╝   ╚═╝    ╚═════╝ ╚═╝     ")
 
-declare version="0.5d 2025-10-27"
+declare version="0.5e 2025-10-30"
 
 #* Get latest version of BazTOP from https://github.com/aristocratos/bashtop
 
@@ -225,7 +225,7 @@ menu_quit_selected=(
 "╚═╝╚╚═╝ ╩ ╩  ")
 
 # ========================================================================================
-# DECLARations 
+# DECLARations
 
 declare -A cpu mem swap proc net box theme disks
 
@@ -317,11 +317,10 @@ box[double_right_corner_down]="╝"
 box[double_title_left]="╟"
 box[double_title_right]="╢"
 
-
 PROGNAME=$(basename $0)
 
 # ========================================================================================
-# Functions 
+# Functions
 
 function usage {
     cat <<EOF
@@ -353,7 +352,7 @@ function init_ { #? Collect needed information and set options before startig ma
 	if (($tty_width<80 | $tty_height<24)); then
 	    resized; #echo -en "${clear_screen}";
 	fi
-	
+
 	#* Draw banner to banner array
 	local letter b_color banner_line y=0
 	local -a banner_out
@@ -372,7 +371,7 @@ function init_ { #? Collect needed information and set options before startig ma
 	    ((++y))
 	done
 	banner=("${banner_out[@]}")
-       
+
 	#* Draw banner to screen and show status while running init
 	draw_banner $((tty_height/2-10))
 
@@ -406,8 +405,8 @@ function init_ { #? Collect needed information and set options before startig ma
 
     #* Check if "curl" command is available, if not, disable update check and theme downloads
     if command -v curl >/dev/null 2>&1; then curled=1; else unset curled; fi
-    unset curled # dont like it 
-    
+    unset curled # dont like it
+
     #* Check if "notify-send" command is available, if not, disable update notifier
     if [[ -n $curled ]] && command -v notify-send >/dev/null 2>&1; then notifier=1; else unset notifier; fi
 
@@ -549,6 +548,7 @@ function init_ { #? Collect needed information and set options before startig ma
 
 function color_init_ { #? Check for theme file and set colors
     local main_bg="" main_fg="#cc" title="#ee" hi_fg="#90" inactive_fg="#40" cpu_box="#3d7b46" mem_box="#8a882e" net_box="#423ba5" proc_box="#923535" proc_misc="#0de756" selected_bg="#7e2626" selected_fg="#ee"
+
     local temp_start="#4897d4" temp_mid="#5474e8" temp_end="#ff40b6" cpu_start="#50f095" cpu_mid="#f2e266" cpu_end="#fa1e1e" div_line="#30"
     local free_start="#223014" free_mid="#b5e685" free_end="#dcff85" cached_start="#0b1a29" cached_mid="#74e6fc" cached_end="#26c5ff" available_start="#292107" available_mid="#ffd77a" available_end="#ffb814"
     local used_start="#3b1f1c" used_mid="#d9626d" used_end="#ff4769" download_start="#231a63" download_mid="#4f43a3" download_end="#b0a9de" upload_start="#510554" upload_mid="#7d4180" upload_end="#dcafde"
@@ -753,7 +753,7 @@ function size_error_msg { #? Shows error message if terminal size is below 80x25
 
     local width=$tty_width
     local height=$tty_height
-    
+
     echo -en "${clear_screen}"
 
     create_box -full -lc "#EE2020" -title "resize window"
@@ -783,9 +783,9 @@ function create_config { #? Creates a new config file with default values from a
     this_file="$(${realpath} "$0")"
     echo "#? Config file for bashtop v. ${version}" > "$config_file"
     while IFS= read -r c_line; do
-	if   [[ $c_line =~ aaz_config ]]; then break
-	elif [[ $c_read == "1" ]]; then echo "$c_line" >> "$config_file"
-	elif [[ $c_line =~ aaa_config ]]; then c_read=1; fi
+	      if   [[ $c_line =~ aaz_config ]]; then break
+	      elif [[ $c_read == "1" ]]; then         echo "$c_line" >> "$config_file"
+	      elif [[ $c_line =~ aaa_config ]]; then c_read=1; fi
     done < "$this_file"
 }
 
@@ -815,18 +815,18 @@ function set_font { #? Take a string and generate a string of unicode characters
     local i letter letter_hex new_hex add_hex start font="$1" string_in="$2" string_out hex="16#"
     if [[ -z $font || -z $string_in ]]; then return; fi
     case "$font" in
-	"sans-serif")		lower_start="1D5BA"; upper_start="1D5A0"; digit_start="1D7E2";;
-	"sans-serif bold")	lower_start="1D5EE"; upper_start="1D5D4"; digit_start="1D7EC";;
-	"sans-serif italic")	lower_start="1D622"; upper_start="1D608"; digit_start="1D7E2";;
-	#"sans-serif bold italic") start="1D656"; upper_start="1D63C"; digit_start="1D7EC";;
-	"script")		lower_start="1D4B6"; upper_start="1D49C"; digit_start="1D7E2";;
-	"script bold")		lower_start="1D4EA"; upper_start="1D4D0"; digit_start="1D7EC";;
-	"fraktur")		lower_start="1D51E"; upper_start="1D504"; digit_start="1D7E2";;
-	"fraktur bold")		lower_start="1D586"; upper_start="1D56C"; digit_start="1D7EC";;
-	"monospace")		lower_start="1D68A"; upper_start="1D670"; digit_start="1D7F6";;
-	"double-struck")	lower_start="1D552"; upper_start="1D538"; digit_start="1D7D8";;
+	      "sans-serif")		lower_start="1D5BA"; upper_start="1D5A0"; digit_start="1D7E2";;
+	      "sans-serif bold")	lower_start="1D5EE"; upper_start="1D5D4"; digit_start="1D7EC";;
+	      "sans-serif italic")	lower_start="1D622"; upper_start="1D608"; digit_start="1D7E2";;
+	      #"sans-serif bold italic") start="1D656"; upper_start="1D63C"; digit_start="1D7EC";;
+	      "script")		lower_start="1D4B6"; upper_start="1D49C"; digit_start="1D7E2";;
+	      "script bold")		lower_start="1D4EA"; upper_start="1D4D0"; digit_start="1D7EC";;
+	      "fraktur")		lower_start="1D51E"; upper_start="1D504"; digit_start="1D7E2";;
+	      "fraktur bold")		lower_start="1D586"; upper_start="1D56C"; digit_start="1D7EC";;
+	      "monospace")		lower_start="1D68A"; upper_start="1D670"; digit_start="1D7F6";;
+	      "double-struck")	lower_start="1D552"; upper_start="1D538"; digit_start="1D7D8";;
 
-	*) echo -n "${string_in}"; return;;
+	      *) echo -n "${string_in}"; return;;
     esac
 
     for((i=0;i<${#string_in};i++)); do
@@ -979,7 +979,7 @@ function get_cpu_info {
 	    read cpu[cores] cpu[threads] <<<"${pyin}"
 	fi
 
-    else 
+    else
 	#if command -v lscpu >/dev/null 2>&1; then lscpu_var="$(lscpu)"; fi
 	lscpu_var="$(zabbix_get -s 127.0.0.1 -k 'system.run[lscpu]')"
 	if [[ -z ${cpu[threads]} || -z ${cpu[cores]} ]]; then
@@ -1114,7 +1114,7 @@ function get_value { #? Get a value from a file, variable or array by searching 
     if [[ -z $ext_var ]]; then echo "${found}"; fi
     if [[ -n $ext_arr ]]; then array_out=(${found}); fi
 }
- 
+
 function get_themes { #? Get themes from config dir subdir
     local file
     theme_int=0
@@ -2082,7 +2082,7 @@ function print { #? Print text, set true-color foreground/background color, add 
 
 # ========================================================================================
 # COLLECTion functions ...
-# 
+#
 function collect_cpu { #? Collects cpu stats and compares with previously collected sample to get cpu usage
     #? Returns cpu usage in array "cpu_usage", index 0 is usage for all threads, following indices corresponds to thread usage in multicore/hyperthreading cpus
     local freq thread i threads=${cpu[threads]}
@@ -2480,14 +2480,14 @@ function collect_processes { #? Collect process information and calculate accura
     if [[ -z $filter ]]; then
 	options="-t"
     fi
-    
+
     # TO BE DONE BETTER! (i.e. without use of system.run)
     local ps_cmd="ps ax${tree:+f} -o pid:${proc[pid_len]}=Pid:,comm:${format_cmd}=${tree:-Program:}${format_args},nlwp:3=Tr:,euser:6=User:,pmem=Mem%,pcpu:10=Cpu% --sort ${proc[reverse]:--}${sort}"
     #readarray ${options} proc_array < <(ps ax${tree:+f} -o pid:${proc[pid_len]}=Pid:,comm:${format_cmd}=${tree:-Program:}${format_args},nlwp:3=Tr:,euser:6=User:,pmem=Mem%,pcpu:10=Cpu% --sort ${proc[reverse]:--}${sort})
 
     readarray ${options} proc_array < <(zabbix_get -s $ZBX_AGT_IP -k "system.run[\"${ps_cmd}\"]")
     #unset ps_cmd
-    
+
     proc_array[0]="${proc_array[0]/      Tr:/ Threads:}"
     proc_array[0]="${proc_array[0]/ ${selected}/${symbol}${selected}}"
 
@@ -2595,7 +2595,7 @@ function collect_processes { #? Collect process information and calculate accura
 		        read -ra det_array < <(zabbix_get -s $ZBX_AGT_IP -k "system.run[\"${ps_cmd}\"]" || true)
 			proc[detailed_parent_pid]="${det_array[0]}"
 			proc[detailed_user]="${det_array[*]:1}"
-			
+
 			# FIXED?
 			ps_cmd="ps -o comm --no-headers -p ${det_array[0]}"
 			#read -r proc[detailed_parent_name] < <(ps -o comm --no-headers -p ${det_array[0]} || true)
@@ -3525,7 +3525,7 @@ function draw_net { #? Draw net information and graphs to screen
 		local dev_len=${#net[device]}
 		if ((dev_len>15)); then dev_len=15; fi
 		unset net_misc 'net[nic_change]'
-		
+
 		print -v net_out -m $((line-1)) $((width-23)) -rs -fg ${box[net_color]} -rp 23 -t "─"
 		print -v net_misc -m $((line-1)) $((width-7-dev_len)) -rs -fg ${box[net_color]} -t "┤" -fg ${theme[hi_fg]} -b -t "‹b " -fg ${theme[title]} -t "${net[device]::15}" -fg ${theme[hi_fg]} -t " n›" -rs -fg ${box[net_color]} -t "├"
 		net_out+="${net_misc}"
@@ -4802,7 +4802,7 @@ fi
 #
 # ======================================================================================================================
 # PY_COMMAND ...
-# 
+#
 
 #* Setup psutil script
 if [[ $use_psutil == true ]]; then
@@ -4826,7 +4826,7 @@ if [[ $use_psutil == true ]]; then
 	echo "${cmd}" >&${pycoproc[1]} #2>/dev/null || true
 	if [[ -n $var ]];   then pyout=""
 	else pyout=();	    fi
-	
+
 	while IFS= read -r -u ${pycoproc[0]} -t 1 output; do #2>/dev/null
 	    if [[ $output == '/EOL' ]];	then break; fi
 	    if [[ -n $failed_pipe ]];	then py_out=""; return 1; fi
@@ -4892,7 +4892,7 @@ if [[ -n "$1" ]]; then
        *)  ZBX_AGT_IP=$1 ;;
    esac
 fi
-   
+
 #  Let us check if zabbix agent has all what is needed ...
 zabbix_get -t 2 -s $ZBX_AGT_IP -k agent.ping >/dev/null
 [[ $? -ne 0 ]] && echo "ERROR: baztop: apparently no Zabbix agent running on $ZBX_AGT_IP" && exit 2
@@ -4941,4 +4941,3 @@ done
 
 #* Quit cleanly even if false starts being true...
 quit_
-
