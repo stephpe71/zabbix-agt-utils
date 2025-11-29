@@ -20,7 +20,7 @@
 
 HOST=${1:-127.0.0.1}
 KEYS_FILE="keys.txt"
-VERSION="0.1 (30-09-2025)"
+VERSION="0.2 (29-11-2025)"
 
 TIMEOUT=1
 
