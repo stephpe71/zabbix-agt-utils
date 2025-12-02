@@ -16,6 +16,19 @@ function colored {
     printf "\033[1;${color}m${text}\033[0m"    
 }
 
+# receives a 1 or 0
+function labeled_colored_status {
+    mystatus=$1
+    local text
+    local color
+    
+    if   [[ $mystatus -eq 1 ]]; then color=$GREEN; text=OK;
+    elif [[ $mystatus -eq 0 ]]; then color=$RED;   text=KO;
+    else color=$MAGENTA;   text=UNKNOWN; fi
+
+    echo $(colored "$text" $color)
+}
+
 function display_colors {
     for color in $(seq 30 37); do
 	echo $color:$(colored "foobar" $color)
