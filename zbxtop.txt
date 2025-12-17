@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# On va le laisser en bash, /bin/sh de FreeBSD insuffisant
+# ==============================================================================
+#
+# Un script pour faire un simili TOP en shell + zbxget/proc.get + jq +
+# mlr + tabulate
+# A executer via system.run
+#
+# ATTENTION : les noms de champs sont un peu différents por Windows -/- Unix
+# windows : wkset linux : rss vmsize
+#
+# TODO:
+# Pour le cpu:
+# - ramener au temps écoulé?
+# - vérifier les unités
+# Affichage avec awk
+# - OK l'index du critere de tri peut etre recupérer
+# Dispatch de la liste des critere seli
+#
+# WORKs !!
+
+
+# ==============================================================================
+# Variables
+
+# On met la dest en 2eme parametre
+ZBXHOST=${1:-127.0.0.1}
+
+# pourrait
+CRITERION=${2:-pmem}
+
+
+NLINES=${3:-10}
+
+# BEWARE: this field are defined for
+CPU_FIELDS_LIN="pid,name,pmem,vsize,rss,cputime_user,cputime_system"
+CPU_FIELDS_LONG="ppid,pid,name,user,pmem,vsize,rss,cputime_user,cputime_system"
+
+CPU_FIELDS_WIN="pid,name,user,vmsize,wkset,cputime_user,cputime_system"
+CPU_FIELDS_WIN="pid,name,vmsize,wkset,cputime_user,cputime_system"
+
+CPU_FIELDS=$CPU_FIELDS_LIN
+
+PROGNAME=$(basename $0)
+DIRNAME=$(dirname   $0)
+
+VERSION="1.0 (17-12-2025)"
+
+DELAY=2
+
+source ${DIRNAME}/utils.sh
+
+# ==============================================================================
+# Fonctions
+
+# $PROGNAME -n NLINES criterion
+function usage {
+    cat <<EOF
+
+        $PROGNAME: usage:
+
+        $PROGNAME criterion [NLINES]
+
+        where criterion is one of
+        pmem vsize rss cputime_user cputime_system
+
+EOF
+}
+
+function criterion_index {
+    criterion=$1
+    echo $CPU_FIELDS | tr ',' '\n' | cat -n | grep "$criterion" | awk '{print $1}'
+}
+
+function check_commands_prerequisites {
+    not_found=""
+    for cmd in zabbix_get jq mlr tail awk
+    do
+        if which $cmd>/dev/null; then : ; else not_found="${not_found} $cmd"; fi
+    done
+
+    if [[ ! -z $not_found ]]; then
+        echo "the following necessary command(s) was/were NOT FOUND:$not_found, exiting..."; exit 1;
+    fi
+}
+
+# agent not reachable or
+# <= 6.2 =>
+function check_agent_version {
+  :
+}
+
+# ==============================================================================
+[[ $1 = "-h" ]] && usage && exit 0
+
+[[ $1 = "-V" ]] && echo "$VERSION" && exit 0
+
+check_commands_prerequisites
+check_agent_version
+awk_index="$(criterion_index $CRITERION)"
+
+#echo awk_index=$awk_index
+
+# Il faut adapter les champs au critère de sélection ...
+#  | awk '{print $2,$6,$7}'
+
+totmem=$(zabbix_get -s $ZBXHOST -k 'vm.memory.size[total]')
+ncores=$(zabbix_get -s $ZBXHOST -k 'system.cpu.num[online]')
+
+while true
+do
+    clear
+    # echo -e "\033[1;37mFOO \033[0m "
+    echo -e "\033[1;37m# Getting process data from '$ZBXHOST', sorting by '$CRITERION' ...\033[0m"
+    #echo -e "\033[1;37m# Total memory: ${totmem} bytes, #cpus: $ncores ...\033[0m"
+    echo -e "\033[1;37m# Total memory: $(convert_to_suffix ${totmem}) bytes, #cpus: $ncores ...\033[0m"
+
+    zabbix_get -s $ZBXHOST -k proc.get | \
+    jq -cM ". | sort_by(.${CRITERION})  | .[] | {$CPU_FIELDS}" | \
+    tail -n $NLINES | mlr --j2t cat | tabulate -1 -f fancy_grid
+
+    sleep $DELAY
+done
