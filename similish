@@ -3,9 +3,12 @@
 # ==============================================================================
 # bash read function does not behave the way I'm used to
 # A similish based on zabbix agent
-
+#
 # This is more a Proof of Concept for now than a reliable tool
 # Not sure if or how it might be useful
+# Update: it may me really useful on the field
+# (well, at least once, at least for me)
+#
 # ==============================================================================
 # TODO
 # - DONE colorise welcome message
@@ -19,33 +22,36 @@
 #
 # - colorize in general => colorlib.sh
 # - use a $HOME/.zashrc ?
-#
-# TODO more difficult, maybe
-# - edit a file on remote system ??
-#
+# - a kind of top
+# - handling logs (grep: sort of)
+
+# Possibility of writing name  of zabbix key directly
+# 
+# ------------------------------------------------------------------------------
 # BUGS
 # - FIXED put a maxdepth param in vdg commands
 # - FIXED handle absolute pathname for cat commands...
-
-# - MAINTAIN COHERENCY for CWD between standard and extended commands
-# - find a way to split arguments with bash 'read' cmd
 #
+# - MAINTAIN COHERENCY for CWD between standard and extended commands
+# - MANAGE 'cd ..'
+# - handle COMMAND ARGUMENT : ls, ll
+# - EXTENDED ARGS: when not supplying WD on CL, add it to arguments
+# ------------------------------------------------------------------------------
+# PROBLEMS: handle / in homogeneous way
+# /, //var/log, 
 # ==============================================================================
 # Section CONFIGURATION
-#
-#set -x
-#
 
 HOST=${1:-127.0.0.1}
 
-VERSION="0.4a (14-10-2025 morning)"
+VERSION="0.5c (10-02-2026 morning)"
 
 DEBUG="1"
 DEBUG=""
 
-TIMEOUT=5
+TIMEOUT=4
 
-SCRIPTNAME=$(basename $0)
+PROGNAME=$(basename $0)
 
 # Not decided yet! SimiliSH sounds funnier in french, but
 # Zash is shorter and more logical
@@ -61,28 +67,22 @@ EXTENDED_COMMANDS=true
 # Let's from there
 CWD="/tmp"
 
-# "basename": "231877",
-# "pathname": "/tmp/.ICE-unix/231877",
-# "dirname": "/tmp/.ICE-unix",
-# "type": "sock",
-# "user": "sperrot",
-# "group": "sperrot",
-# "permissions": "0777",
-# "uid": 1000,
-# "gid": 1000,
-# "size": 0,
-
 JQ_LL_EXTRACTOR="{type:.type, perms:.permissions, user:.user, group:.group, size:.size, datetime:.time.change, name:.basename}"
 
+# TO BE DEFINED
+#JQ_PS_EXTRACTOR="{type:.type, perms:.permissions, user:.user, group:.group, size:.size, datetime:.time.change, name:.basename}"
+
+# Maintain value of zabbix
 # ==============================================================================
 # Section FUNCTIONS
 
 function usage {
+
     cat <<EOF
 
-    $SCRIPTNAME: usage:
+    $PROGNAME: usage:
 
-    $SCRIPTNAME is a minimal read only shell (sort of) based on zabbix agent
+    $PROGNAME is a minimal read only shell (sort of) based on zabbix agent
     various keys (vfs.dir.get, vfs.file.*, system.run if avail., etc ...)
 
     Not implemented: pipes, completion, modifications, awk, sed ...
@@ -112,11 +112,12 @@ function display_welcome_message {
 
     echo "## You are connected to host '$(colored $HOST $BRIGHT)'"
     echo "## Agent version there is '$(colored $agent_version $BRIGHT)'"
-    [[ ! -z $EXTENDED_COMMANDS ]] && echo "## Extended commands are $(colored activated $BRIGHT)..."
+    [[ ! -z $EXTENDED_COMMANDS ]] && echo "## Extended commands (system.run) are $(colored activated $BRIGHT)..."
     echo
 }
 
 function help {
+
     cat<<EOF
     # Some commands:
      pwd: display current directory
@@ -127,19 +128,49 @@ function help {
 EOF
 }
 
+# factorizes everything before key
+function zg-k {
+   local key="$1"
+
+   zabbix_get -s $HOST -k "${key}"
+}
+
+# echos 1 if 
+function dir_exists_p {
+    local dirpath="$1"
+    local key="vfs.file.exists[${dirpath},dir]"
+
+    zg-k "$key"
+}
+
+# FIXME: carefully handle quoting
+function zg_sr {
+    local cmd="$1"
+    local key="system.run[${cmd}]"
+
+    zg-k "$key"
+}
+
+
 # ==============================================================================
 #  MAIN
 # FIXME: put in a getopt while loop
 #set -x
 #local flag OPTIND=1 OPTARG="" OPTERR=0
 
-source "colorlib.sh"
+filename="colorlib.sh"
+
+if [[ ! -r $filename ]]; then
+    echo "$filename: not found, exiting ... "; exit 1;
+else
+    source $filename
+fi
 
 while getopts "hV" flag "$@"
 do
     case $flag in
 	h) usage && exit 0 ;;
-	V) echo "$SCRIPTNAME: $VERSION" && exit 0 ;;
+	V) echo "$PROGNAME: $VERSION" && exit 0 ;;
 
 	*) exit 1 ;;
     esac
@@ -147,13 +178,12 @@ done
 
 # Does agent respond on specified target?
 zabbix_get -t $TIMEOUT -s $HOST -k agent.ping >/dev/null
-[[ $? -ne 0 ]] && echo "$SCRIPTNAME[agent.ping]: error: agent did respond on time, exiting..." && exit 2
+[[ $? -ne 0 ]] && echo "$PROGNAME[agent.ping]: error: agent did respond on time, exiting..." && exit 2
 
 # Does agent support proc.get key? (only recent versions)
 agent_version=$(zabbix_get -t $TIMEOUT -s $HOST -k agent.version)
 [[ ! -z $DEBUG ]] && echo "agent_version='$agent_version'"
 case $agent_version in
-
     [6].[246]*)   : ;;
     [7-9].*)      : ;;
     *)		  echo "zabbix agent version: too old version (key 'proc.get' not supported)" && exit 3 ;;
@@ -184,63 +214,100 @@ do
     [[ -n $DEBUG ]] && echo "cmd='$cmd' arg1='$arg1' arg2='$arg2' arg3='$arg3'"
     
     # Better used with implicit $* arguments?
+    # HOW do we handle 
     case "$cmd" in
 
 	pwd)	echo $CWD ;;
 
-	cd)	case $arg1 in
+	# 
+	cd)
+	    local OLDCWD=$CWD
+	    case $arg1 in
 		    /*) CWD=$arg1 ;;
+		    ..) CWD=${CWD%/*}; [[ $CWD = "" ]] && CWD="/" ;;
 		     *) CWD=$CWD/$arg1 ;; #FIXME: add check of existence !!
 		esac
-		CWD=$(echo $CWD | perl -pe 's@(/+)@/@g')
-	        echo $CWD
-		;;
+	    # FIXME: tests if exists!!
+	    if [[ $(dir_exists_p "$CWD") -ne 1 ]]; then
+		echo "$PROGNAME: $CWD does not exist on remote host!!"
+		CWD=$OLDCWD
+	    fi
+	    # FIXME: check validity of hack!!
+	    [[ $CWD != "/" ]] && CWD=$(echo $CWD | perl -pe 's@(/+)@/@g')
+	    echo $CWD
+	    ;;
 	
 	cat) case $arg1 in
 		    /*) pathname=$arg1 ;;
 		     *) pathname=$CWD/$arg1 ;; #FIXME: add check of existence !!
 	     esac
-	    zabbix_get -s $HOST -k "vfs.file.contents[$pathname]"
+	    #zabbix_get -s $HOST -k "vfs.file.contents[$pathname]"
+	    zg-k "vfs.file.contents[$pathname]"
             ;;
-	
-	# -rw-r--r-- 1 sperrot sperrot  352 10 oct.  15:19 IDEES
+
+	# ----------------------------------------------------------------------
+	help)	usage ;;
+
+	# ----------------------------------------------------------------------
+	# FIXME: to be handled together
+	# handle '..' and co 
 	ls)
-	    zabbix_get -s $HOST -k "vfs.dir.get[$CWD,,,,,0]" | jq -cr '.[] | .basename' ;;
+	    zg-k "vfs.dir.get[$CWD,,,,,0]" | jq -cr '.[] | .basename' ;;
 
 	ll)
 	    # | mlr --j2t cat | tabulate -1 -f pipe
-	    zabbix_get -s $HOST -k "vfs.dir.get[$CWD,,,,,0]" | jq -cMr ".[] | $JQ_LL_EXTRACTOR" \
-	    | mlr --j2t cat | tabulate -1 -f plain
+	    zg-k "vfs.dir.get[$CWD,,,,,0]" | jq -cMr ".[] | $JQ_LL_EXTRACTOR" | mlr --j2t cat | tabulate -1 -f plain
 	    ;;
 
 	ltr) # FIXME: fix duplication with 
-	    zabbix_get -s $HOST -k "vfs.dir.get[$CWD,,,,,0]" | jq -cMr ". | sort_by(.time.change) | .[] | $JQ_LL_EXTRACTOR" \
-	    | mlr --j2t cat | tabulate -1 -f plain
+	    zg-k "vfs.dir.get[$CWD,,,,,0]" | jq -cMr ". | sort_by(.time.change) | .[] | $JQ_LL_EXTRACTOR" | mlr --j2t cat | tabulate -1 -f plain
 	    ;;
+ 
+	# ----------------------------------------------------------------------
+	ps)	echo "NOT YET IMPLEMENTED..." ;;
 
-	cksum|md5sum) pathname=$CWD/$arg1
-	    zabbix_get -s $HOST -k "vfs.file.${cmd}[$pathname]"
+	# ----------------------------------------------------------------------
+	top)	echo "NOT YET IMPLEMENTED..." ;;
+
+	# ----------------------------------------------------------------------
+	cksum|md5sum)
+	    case $arg1 in
+		    /*) pathname=$arg1 ;;
+		     *) pathname=$CWD/$arg1 ;; #FIXME: add check of existence !!
+	    esac
+	    
+	    zg-k "vfs.file.${cmd}[$pathname]"
             ;;
+
 	grep) # FIXME: should handle grep options, if possible
 	    regexp="$arg1"
-	    pathname=$CWD/$arg2
-	    zabbix_get -s $HOST -k "vfs.file.regexp[$pathname,$regexp]"
+	    case $arg2 in
+		    /*) pathname=$arg2 ;;
+		     *) pathname=$CWD/$arg2 ;; #FIXME: add check of existence !!
+	    esac
+	    zg-k "vfs.file.regexp[$pathname,$regexp]"
 	    ;;
 
-	uname)		zabbix_get -s $HOST -k "system.uname"   ;;
-	hostname)	zabbix_get -s $HOST -k "system.hostname" ;;
-	uptime)		zabbix_get -s $HOST -k "system.uptime" ;;
+	uname)		zg-k "system.uname"   ;;
+	hostname)	zg-k "system.hostname" ;;
+	uptime)		zg-k "system.uptime" ;;
 
         version)	echo "$PROGRAM_NAME version $VERSION" ;;
 
 	exit|quit)	exit $current_rc ;;
 
-	help)	help ;;
+	help)		help ;;
 
-	"")	: ;; # handle useless use of 'Enter' key
+	# ------------------------------------------------------------------------
+	# Detection of zabbix keys
+	agent.*|kernel.*) echo "Zabbix Agent key: NOT IMPLEMENTED YET..." ;;
+	
+	# ------------------------------------------------------------------------
+	"")		: ;; # handle useless use of 'Enter' key
 	
 	*)   if [[ ! -z $EXTENDED_COMMANDS ]]; then
-	       zabbix_get -s $HOST -k "system.run[$cmd $arg1 $arg2 $arg3 $arg4]"
+	       # FIXME: handle CWD
+	       zg-k "system.run[$cmd $arg1 $arg2 $arg3 $arg4]"
 	     else
 		 echo "Unknown command: '$cmd'"
 	     fi ;;
