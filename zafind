@@ -11,21 +11,33 @@
 # 
 # Author : Stéphane Perrot 	(C) 2023 
 #
+# ----------------------------------------------------------------------------------------------
 # TODO:
-# Implement -notname ?
-# 
+#
+# DONE (sort of) Implement -ls (as in similish)
 # ==============================================================================================
 # For test default target
 
 ip=""
 TRACE=""
  
-VERSION="0.6 (11-07-2023)"
+VERSION="0.7a (14-04-2026)"
  
 PROGNAME=$(basename $0)
  
 #TRACE=on
 TRACE=""
+
+# From (my script) similish
+JQ_LL_EXTRACTOR="{type:.type, perms:.permissions, user:.user, group:.group, size:.size, datetime:.time.change, name:.basename}"
+
+# From tabulate help, there are actually more recent format supported
+# set output table format; supported formats:
+#                           plain, simple, grid, fancy_grid, pipe, orgtbl,
+#                           rst, mediawiki, html, latex, latex_raw,
+#                           latex_booktabs, latex_longtable, tsv
+#                           (default: simple)
+GRID_STYLE=simple
 
 # ==============================================================================================
 # Section fonctions ...
@@ -40,14 +52,17 @@ function usage {
  
      $PROGNAME: usage:
  
-     $PROGNAME -ip ip -from topdir [-type f|d|l ] [-mtime -/+ ndays] [-size +10m] [-name pattern]
+     $PROGNAME -ip ip -from topdir [-type f|d|l ] [-mtime -/+ ndays] [-size +10m] [-name pattern] [-ls] [-grid-style pattern]
  
-     $PROGNAME -h
+     $PROGNAME -h|--help
+
+     $PROGNAME -V|--version
  
      find equivalent, based on the new possibilities of zbx.dir.get key in Zabbix Agent (v6.0)
      -exec is not generally implementable
  
-     outputs json: display options (-ls, other) are better left to an external visu utility
+     outputs json, or text tabulated output when -ls is specified (-grid-style allows one to slightly modify output format (see tabulate(1))
+
      same goes to -exec grep ... : better left to an external utility
  
 EOF
@@ -99,6 +114,8 @@ min_age=""
 max_age=""
  
 regex_excl_dir=""
+
+# ----------------------------------------------------------------------------------------------
  
 [[ -n $TRACE ]] && set -x
  
@@ -107,37 +124,24 @@ do
   opt=$1
   case $opt in
  
-   -h|--help)       usage;          exit 0 ;;
-   -v|--version)    show_version;   exit 0 ;;
+   -h|--help)		usage;          exit 0 ;;
+   -V|--version)	show_version;   exit 0 ;;
  
-   -from|-dir) 		dir=$2;  		shift ;;
+   -from|-dir)		dir=$2;  	shift ;;
  
-   -host|-ip)  		ip=$2;   		shift ;;
+   -host|-ip)  		ip=$2;   	shift ;;
  
-   -exec)
-        echo "-exec option not implemented yet, exiting..."; exit 9 ;;
+   -exec)		echo "-exec option not implemented yet, exiting..."; exit 9 ;;
  
-   #file,dir,sym,sock,bdev,cdev,fifo". Multiple types must be separated with comma and quoted.
-   -type)
-        arg=$2
-        case $arg in
-          f) 	types_incl="file" ;;
-          d) 	types_incl="dir" ;;
-          l) 	types_incl="sym" ;;
-          s) 	types_incl="sock" ;;
-          b) 	types_incl="bdev" ;;
-          c) 	types_incl="cdev" ;;
-          ff) 	types_incl="fifo" ;;
-	  *) echo "${PROGNAME}: unknown option: '$arg'..." 
-        esac
- 
-        shift ;;
- 
+   -grid-style )	GRID_STYLE=$2;  shift ;;
+
+   -ls)			DO_LS=yes ;;
+       
    -mtime)
         arg=$2
         case $arg in
-          +*) value=${arg##*+}; (( min_age = value * 86400 ));;
-          -*) value=${arg##*-}; (( max_age = value * 86400 ));;
+          +*) value=${arg##*+}; (( min_age = value * 86400 )) ;;
+          -*) value=${arg##*-}; (( max_age = value * 86400 )) ;;
         esac
  
         shift ;;
@@ -171,6 +175,23 @@ do
  
         shift ;;
  
+   #file,dir,sym,sock,bdev,cdev,fifo". Multiple types must be separated with comma and quoted.
+   #FIXME: handle multiple types together...
+   -type)
+        arg=$2
+        case $arg in
+          f) 	types_incl="file" ;;
+          d) 	types_incl="dir"  ;;
+          l) 	types_incl="sym"  ;;
+          s) 	types_incl="sock" ;;
+          b) 	types_incl="bdev" ;;
+          c) 	types_incl="cdev" ;;
+          ff) 	types_incl="fifo" ;;
+	  *) echo "${PROGNAME}: unknown option: '$arg'..." 
+        esac
+ 
+        shift ;;
+ 
     *)   echo "option non supportee : $opt" ;;
  
   esac
@@ -181,9 +202,9 @@ done
 #echo "ip=$ip dir=$dir ..."
 [[ -z $ip  ]] && echo "ERROR: target (ip-or-host) must be specified, exiting..."            && exit 2
 [[ -z $dir ]] && echo "ERROR: top directory must be specified (ex: -dir /opt)), exiting..." && exit 3
- 
+
+# FIXME: handle this in check_prerequisites
 zabbix_get 2>&1 >/dev/null
- 
 rc=$? # 1 if present, 127 otherwise
 case $rc in
   1)   : ;;
@@ -197,6 +218,15 @@ case $version in
    *)           echo "Remote agent is not sufficiently recent (actual version: ${version}, minimum version: v6.0)..." && exit 4;;
 esac
 
-zabbix_get -s "$ip" -k "vfs.dir.get[${dir},${regex_incl},${regex_excl},${types_incl},${types_excl},${max_depth},${min_size},${max_size},${min_age},${max_age},${regex_excl_dir}]"
- 
+# FIXME: better handle duplication ... (eval ?)
+if [[ -z $DO_LS ]] ; then
+    
+    zabbix_get -s "$ip" -k "vfs.dir.get[${dir},${regex_incl},${regex_excl},${types_incl},${types_excl},${max_depth},${min_size},${max_size},${min_age},${max_age},${regex_excl_dir}]"
+
+else
+
+    zabbix_get -s "$ip" -k "vfs.dir.get[${dir},${regex_incl},${regex_excl},${types_incl},${types_excl},${max_depth},${min_size},${max_size},${min_age},${max_age},${regex_excl_dir}]" | jq -cMr ".[] | $JQ_LL_EXTRACTOR" | mlr --j2t cat | tabulate -1 -f ${GRID_STYLE}
+
+fi
+
 
