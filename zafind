@@ -10,21 +10,23 @@
 # printed by tools such as jq, mlr, ...
 # 
 # Author : Stéphane Perrot 	(C) 2023 
-#
 # ----------------------------------------------------------------------------------------------
 # TODO:
 #
+# DONE (sort of) implement -newer 
 # DONE (sort of) Implement -ls (as in similish)
+# FIXME? correctly display files/dirs appearing in subdirs (that is prefixed with relative path)
+# display a format more alike 
 # ==============================================================================================
 # For test default target
 
 ip=""
 TRACE=""
  
-VERSION="0.7a (14-04-2026)"
+VERSION="0.7c (15-04-2026 evening)"
  
 PROGNAME=$(basename $0)
- 
+
 #TRACE=on
 TRACE=""
 
@@ -42,9 +44,17 @@ GRID_STYLE=simple
 # ==============================================================================================
 # Section fonctions ...
 
-# +TODO TO BE DEFINED
 function check_prerequisites {
-  :
+
+    local necessary_commands="" # CHECK for jq, mlr, tabulate ??
+    local missing_commands=""
+
+    zabbix_get 2>&1 >/dev/null
+    rc=$? # 1 if present, 127 otherwise
+    case $rc in
+	1)   : ;;
+	127) echo "zabbix_get not available on this host, exiting ..."; exit 8;;
+    esac
 }
 
 function usage {
@@ -52,7 +62,7 @@ function usage {
  
      $PROGNAME: usage:
  
-     $PROGNAME -ip ip -from topdir [-type f|d|l ] [-mtime -/+ ndays] [-size +10m] [-name pattern] [-ls] [-grid-style pattern]
+     $PROGNAME -ip ip -from topdir [-type f|d|l ] [-mtime -/+ ndays] [-size +10m] [-name pattern] [-newer reference] [-ls] [-grid-style pattern] 
  
      $PROGNAME -h|--help
 
@@ -76,7 +86,7 @@ function show_version {
 # Output: value mult by multiplier
 # NB : the leading + or - is not expected ...
 function get_actual_value {
- 
+
   tmp=$1
  
   value=${tmp%[MGk]*}
@@ -121,102 +131,109 @@ regex_excl_dir=""
  
 while [[ $# -ge 1 ]]
 do
-  opt=$1
-  case $opt in
- 
-   -h|--help)		usage;          exit 0 ;;
-   -V|--version)	show_version;   exit 0 ;;
- 
-   -from|-dir)		dir=$2;  	shift ;;
- 
-   -host|-ip)  		ip=$2;   	shift ;;
- 
-   -exec)		echo "-exec option not implemented yet, exiting..."; exit 9 ;;
- 
-   -grid-style )	GRID_STYLE=$2;  shift ;;
+    opt=$1
+    case $opt in
+	
+	-h|--help)		usage;          exit 0 ;;
+	-V|--version)	show_version;   exit 0 ;;
+	
+	-from|-dir)		dir=$2;  	shift ;;
+	
+	-host|-ip)  		ip=$2;   	shift ;;
+	
+	-exec)		echo "-exec option not implemented yet, exiting..."; exit 9 ;;
+	
+	-grid-style )	GRID_STYLE=$2;  shift ;;
 
-   -ls)			DO_LS=yes ;;
-       
-   -mtime)
-        arg=$2
-        case $arg in
-          +*) value=${arg##*+}; (( min_age = value * 86400 )) ;;
-          -*) value=${arg##*-}; (( max_age = value * 86400 )) ;;
-        esac
- 
-        shift ;;
- 
-   -maxdepth)
-        arg=$2; max_depth=$arg
-        shift ;;
- 
-   -name) # for now ...
-        arg=$2; regex_incl="$2"
-        #echo "rexexp_incl='$regex_incl'"
-        shift ;;
- 
-   -notname) # for now ...
-        arg=$2; cl="$2"
-        echo "rexexp_excl='$regex_excl'"
-        shift ;;
+	-ls)			DO_LS=yes ;;
+	
+	-mtime)
+	    [[ -n $newer_ref ]] && echo "a '-newer' option has already been specified, only one if allowed, exiting..." && exit 8
+	    arg=$2
+            case $arg in
+		+*) value=${arg##*+}; (( min_age = value * 86400 )) ;;
+		-*) value=${arg##*-}; (( max_age = value * 86400 )) ;;
+            esac
+	    
+            shift ;;
+	
+	-maxdepth)
+            arg=$2; max_depth=$arg
+            shift ;;
+	
+	-name) # for now ...
+            arg=$2; regex_incl="$2"
+            #echo "rexexp_incl='$regex_incl'"
+            shift ;;
 
-   -size) # TODO: handle k, M or G suffix  !!
-        arg=$2
-        #echo "option=-size arg=$arg"
-        case $arg in # presumed in k for now
-          +*) tmp=${arg##*+}
-              min_size=$(get_actual_value $tmp);
-              ;;
-          -*) tmp=${arg##*-};
-              max_size=$(get_actual_value $tmp);
-              ;;
-        esac
-        [[ ! -z $TRACE ]] && echo "max_size=$max_size  min_size=$min_size"
- 
-        shift ;;
- 
-   #file,dir,sym,sock,bdev,cdev,fifo". Multiple types must be separated with comma and quoted.
-   #FIXME: handle multiple types together...
-   -type)
-        arg=$2
-        case $arg in
-          f) 	types_incl="file" ;;
-          d) 	types_incl="dir"  ;;
-          l) 	types_incl="sym"  ;;
-          s) 	types_incl="sock" ;;
-          b) 	types_incl="bdev" ;;
-          c) 	types_incl="cdev" ;;
-          ff) 	types_incl="fifo" ;;
-	  *) echo "${PROGNAME}: unknown option: '$arg'..." 
-        esac
- 
-        shift ;;
- 
-    *)   echo "option non supportee : $opt" ;;
- 
-  esac
- 
-  shift
+	-newer) # BEING IMPLEMENTED
+	    [[ -n $max_age ]] && echo "a '-mtime' option has already been specified, only one if allowed, exiting..." && exit 7
+            newer_ref=$2
+            shift ;;
+
+	-notname) # for now ...
+            arg=$2; cl="$2"
+            echo "rexexp_excl='$regex_excl'"
+            shift ;;
+
+	-size) # TODO: handle k, M or G suffix  !!
+            arg=$2
+            #echo "option=-size arg=$arg"
+            case $arg in # presumed in k for now
+		+*) tmp=${arg##*+}
+		    min_size=$(get_actual_value $tmp);
+		    ;;
+		-*) tmp=${arg##*-};
+		    max_size=$(get_actual_value $tmp);
+		    ;;
+            esac
+            [[ ! -z $TRACE ]] && echo "max_size=$max_size  min_size=$min_size"
+	    
+            shift ;;
+	
+	#file,dir,sym,sock,bdev,cdev,fifo". Multiple types must be separated with comma and quoted.
+	#FIXME: handle multiple types together...
+	-type)
+            arg=$2
+            case $arg in
+		f) 	types_incl="file" ;;
+		d) 	types_incl="dir"  ;;
+		l) 	types_incl="sym"  ;;
+		s) 	types_incl="sock" ;;
+		b) 	types_incl="bdev" ;;
+		c) 	types_incl="cdev" ;;
+		ff) 	types_incl="fifo" ;;
+
+		*) echo "${PROGNAME}: unknown option: '$arg'..." 
+            esac
+	    
+            shift ;;
+	
+	*)   echo "option non supportee : $opt" ;;
+	
+    esac
+    
+    shift
 done
+
+check_prerequisites
 
 #echo "ip=$ip dir=$dir ..."
 [[ -z $ip  ]] && echo "ERROR: target (ip-or-host) must be specified, exiting..."            && exit 2
 [[ -z $dir ]] && echo "ERROR: top directory must be specified (ex: -dir /opt)), exiting..." && exit 3
 
-# FIXME: handle this in check_prerequisites
-zabbix_get 2>&1 >/dev/null
-rc=$? # 1 if present, 127 otherwise
-case $rc in
-  1)   : ;;
-  127) echo "zabbix_get not available on this host, exiting ..."; exit 8;;
-esac
- 
 version=$(zabbix_get -s "$ip" -k "agent.version")
  
 case $version in
    [6789].*)    : ;;
    *)           echo "Remote agent is not sufficiently recent (actual version: ${version}, minimum version: v6.0)..." && exit 4;;
 esac
+
+if [[ ! -z $newer_ref ]]; then
+    ref_ts=$(zabbix_get -s "$ip" -k "vfs.file.time[${newer_ref},modify]")
+    #echo ${newer_ref}=$ref_ts 1>&2
+    max_age=$ref_ts
+fi
 
 # FIXME: better handle duplication ... (eval ?)
 if [[ -z $DO_LS ]] ; then
