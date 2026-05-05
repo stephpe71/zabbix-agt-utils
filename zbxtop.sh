@@ -39,7 +39,7 @@ DIRNAME=$( dirname  $0)
 RECORD_DIR=/var/tmp
 
 RECORD_DIR=/var/tmp/multi_hosts/$ZBXHOST
-VERSION="0.9a (28-04-2026)"
+VERSION="0.9b (05-05-2026)"
 
 GRID_STYLE=fancy_grid
 
@@ -106,7 +106,6 @@ function check_agent_version_os_type {
 # ==============================================================================
 [[ $1 = "-h" ]] && usage && exit 0
 [[ $1 = "-V" ]] && echo "$VERSION" && exit 0
-
 [[ $1 = "-r" ]] && DO_RECORD=1 && shift
 
 check_commands_prerequisites
@@ -118,15 +117,18 @@ mkdir -p $RECORD_DIR
 awk_index="$(criterion_index $CRITERION)"
 
 totmem=$(zabbix_get -s $ZBXHOST -k vm.memory.size[total] )
+#FIXME? system.cpu.num cannot be retrieved shortly after boot
+#(agent cache now filled up yet?) => disgracefull errort messages displayed
 ncores=$(zabbix_get -s $ZBXHOST -k system.cpu.num[online])
 
 #echo ncores=$ncores
 while true
 do
     clear
-    echo $(colored "# Getting process data from '$ZBXHOST', sorting by '$CRITERION' ..." $BRIGHT)
-    echo $(colored "# Total memory: $(convert_to_suffix $totmem), # of cpus: $ncores"    $BRIGHT)
-
+    # Plain $BRIGHT works, too...
+    echo "# Getting process data from $(colored $ZBXHOST $RED), sorting by $(colored $CRITERION $YELLOW) ..."
+    echo "# Total memory: $(colored $(convert_to_suffix $totmem) $GREEN), # of cpus: $(colored $(convert_to_suffix $ncores) $BLUE)"
+    
     timestamp=$(date +%s)
     tmpfile=${RECORD_DIR}/${timestamp}_proc-get.json
     
