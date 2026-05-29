@@ -5,6 +5,9 @@
 # Un script a mettre sous /tmp et
 # executer via system.run
 #
+# BUG
+# First incantation of system.cpu.num value is udefined ...
+#
 # TODO:
 # Pour le cpu:
 # - ramener au temps écoulé?
@@ -39,7 +42,7 @@ DIRNAME=$( dirname  $0)
 RECORD_DIR=/var/tmp
 
 RECORD_DIR=/var/tmp/multi_hosts/$ZBXHOST
-VERSION="0.9b (05-05-2026)"
+VERSION="0.9b (29-05-2026)"
 
 GRID_STYLE=fancy_grid
 
@@ -89,6 +92,7 @@ function check_commands_prerequisites {
 # agent not reachable or
 # <= 6.2 =>
 function check_agent_version_os_type {
+
   local agent_version=$(zabbix_get -s $ZBXHOST -k agent.version)
   local os_type=$(zabbix_get -s $ZBXHOST -k system.sw.os | awk '{print $1}')
 
@@ -101,6 +105,61 @@ function check_agent_version_os_type {
 	  *)		CPU_FIELDS=$CPU_FIELDS_LIN ;;
       esac
   fi
+}
+
+# ------------------------------------------------------------------------------
+function emit_html_prelude {
+    cat <<EOF
+<html>
+  <head>
+    <meta http-equiv="refresh" content="10">
+    Getting process data from <b>127.0.0.1</b>, sorting by <b>pmem</b>
+    <br>
+    Total memory: <b>16 GB</b>, # of cpus: <b>8</b>
+  </head>
+  <body>
+EOF
+}
+
+function emit_html_postlude {
+    cat <<EOF
+  </body>
+</html>
+EOF
+}
+
+
+function tsv2htbl_genhdr {
+    echo -n "      <tr>"
+    head -1 zbxtop.tsv | \
+	while read -d '	' field
+	do
+	    echo -n "<th>${field}</th>"
+	done
+    echo "</tr>"
+}
+
+function tsv2htbl_genrows {
+    # a while line should be inserted here
+    while read -u 3 line
+    do
+	# At this point we have the '\t'
+        echo -n "       <tr>"
+	echo "$line" | while read -d '	' value
+	do
+	    echo -n "<td>${value}</td>"
+	done
+        echo "</tr>"
+    done 3< <(tail -n +2 zbxtop.tsv)
+}
+
+function tsv2htbl {
+    emit_html_prelude
+    echo "    <table>"
+    tsv2htbl_genhdr 
+    tsv2htbl_genrows
+    echo "    </table>"
+    emit_html_postlude
 }
 
 # ==============================================================================
@@ -125,9 +184,10 @@ ncores=$(zabbix_get -s $ZBXHOST -k system.cpu.num[online])
 while true
 do
     clear
+
     # Plain $BRIGHT works, too...
     echo "# Getting process data from $(colored $ZBXHOST $RED), sorting by $(colored $CRITERION $YELLOW) ..."
-    echo "# Total memory: $(colored $(convert_to_suffix $totmem) $GREEN), # of cpus: $(colored $(convert_to_suffix $ncores) $BLUE)"
+    echo "# Total memory: $(colored $(convert_to_suffix $totmem) $GREEN), # of cpus: $(colored $ncores $BLUE)"
     
     timestamp=$(date +%s)
     tmpfile=${RECORD_DIR}/${timestamp}_proc-get.json
@@ -135,9 +195,20 @@ do
     #zabbix_get -s $ZBXHOST -k proc.get 
     zabbix_get -s $ZBXHOST -k proc.get > ${tmpfile}
 
+    # HOW TO add a value specific
+    # Apres le .[] on a un objet json par ligne unix (d'ou le head qui fonctionne)
+    # HTML :
+
+    # HTML : Candidate line for transforming tsb into html table ... works, sort of (of to refresh ?)
+    #cat zbxtop.tsv | ~/src/tabulate/tabulate.sh -t "Zbxtop Data" -h "Getting data from 127.0.0.1, sorting by pmem" > test3.html
+
+    #FIXME: Quoting of values
     cat $tmpfile | \
 	jq -cM ". | sort_by(.${CRITERION}) | reverse | .[] | {$CPU_FIELDS}" | \
-	head -n $NLINES | mlr --j2t cat | tabulate --sep="\t" -1 -f $GRID_STYLE
+	#head -n $NLINES | mlr --j2t cat | tabulate --sep="\t" -1 -f $GRID_STYLE | tee zbxtop.out
+	head -n $NLINES | mlr --j2t cat | tee zbxtop.tsv | tabulate --sep="\t" -1 -f $GRID_STYLE
+
+    tsv2htbl > zbxtop.html
 
     sleep $DELAY
 
