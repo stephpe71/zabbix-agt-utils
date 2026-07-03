@@ -20,7 +20,7 @@
 (in-package :CL-USER)
 
 (defpackage :TEST-WHO
-  (:use :cl :cl-who :split-sequence))
+  (:use :cl :cl-who :split-sequence :mp))
 
 (in-package :TEST-WHO)
 
@@ -28,20 +28,7 @@
 
 (defparameter *delay*		10) ;; must match the one defined in zbxtop.sh
 
-;; -------------------------------------------------------------------
-;; Test basic table WHO => OK
-(defun test-alternated-colors-table ()
-  (with-html-output (*standard-output*)
-    (:table :border 0 :cellpadding 4
-     (loop for i below 25 by 5
-           do (htm
-               (:tr :align "right"
-                (loop for j from i below (+ i 5)
-                      do (htm
-                          (:td :bgcolor (if (oddp j)
-                                            "pink"
-                                          "green")
-                           (fmt "~@R" (1+ j)))))))))) )
+(defparameter *timer*		nil) ;; object used by mp:schedule-timer ...
 
 ;; -------------------------------------------------------------------
 ;; don't forget to call as-=keyword to build method discriminant
@@ -52,7 +39,7 @@
 
 ;; set to t to get additional debug messages
 (defparameter *debug*             nil)
-(defparameter *version*           "0.1 (10-06-2026)")
+(defparameter *version*           "0.2 (03-07-2026)")
 
 (defun test-read-tsv (&optional (fname "zbxtop.tsv"))
   (with-open-file      (in fname :direction :input)
@@ -67,7 +54,7 @@
                   (format t "~&~{~a ~}~%" field-positions)))))))
 
 ;;(setq *line* "pid	name	user	pmem	vsize	rss	swap	threads	ctx_switches	cputime_user	cputime_system")
--;;(test-read-tsv "zbxtop.tsv")
+;;(test-read-tsv "zbxtop.tsv")
 
 (defun gen-html-from-tsv (&optional (fname "zbxtop.tsv"))
   (with-open-file      (in fname :direction :input)
@@ -188,7 +175,7 @@
     (write-html-table :outfn "/tmp/out.html" :table *table* :ip "10.23.8.10")
     ))
 
-;; seems to work
+;; seems to work (exept data bugà
 ;(setq *timer*      (mp:make-timer 'parse-data-gen-html))
 ;(mp:schedule-timer-relative *timer* 10 10)
 ;(mp:unschedule-timer *timer*)
@@ -197,26 +184,3 @@
 ;(write-html-table :outfn #P"/tmp/out.html" :table *table* :ip "10.23.8.10")
 ;(parse-data-gen-html)
 
-;; --------------------------------------------------------------------------------------------------------------------------------
-;; Work In Progress !!
-(defun generate-complete-page (&key (ip "127.0.0.1") (criterion "pmem") (memory "16_GB") (ncores 4) (timestamp "<ts undefined>"))
-  (with-open-file (out "all.html" :direction :output :if-exists :supersede)
-    (with-html-output (out)
-      (htm
-       (:header (:meta :http-equiv "refresh" :content 10)
-        (fmt "Getting process data from <b>~a</b>, sorting by <b>~a</b><br>Total memory: <b>~a</b>, #of cpus: <b>~a (~a)</b>" ip criterion memory ncores timestamp)
-        )
-       (:body
-        (:table :border 0 :cellpadding 4
-         (loop for i below 25 by 5
-               do (htm
-                   (:tr :align "right"
-                    (loop for j from i below (+ i 5)
-                          do (htm
-                              (:td :bgcolor (if (oddp j)
-                                                "pink"
-                                              "green")
-                               (fmt "~@R" (1+ j))))))))))))))
-
-;;(generate-complete-page  :ip "10.23.0.1")
-;;(fresh-line t)
