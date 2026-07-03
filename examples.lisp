@@ -1,12 +1,22 @@
 ;; -------------------------------------------------------------------
 ;; Test cl-who & split-sequence
-
+;;
 ;; the purpose of all this if to use htm macro
 ;; to easly colorate cells (more easily than in shell)
 ;;
-;; June 2026 Stephane Perrot
+;; (C) June 2026 Stephane Perrot
 ;; -------------------------------------------------------------------
-
+;; TODO:
+;; - *default-bgcolor* should handle dark-theme and light-theme
+;; - periodic call of table
+;; - renaming
+;; -------------------------------------------------------------------
+;; BUGS:
+;; Depending of loading, split-sequence as used here
+;; is the one from SPLIT-SEQUENCE system (not LispWorks's)
+;;
+;; is it really interesting?
+;; -------------------------------------------------------------------
 (in-package :CL-USER)
 
 (defpackage :TEST-WHO
@@ -14,8 +24,11 @@
 
 (in-package :TEST-WHO)
 
-;; -------------------------------------------------------------------
+(defparameter *data-dir*	#P"/var/tmp/zbxtop")
 
+(defparameter *delay*		10) ;; must match the one defined in zbxtop.sh
+
+;; -------------------------------------------------------------------
 ;; Test basic table WHO => OK
 (defun test-alternated-colors-table ()
   (with-html-output (*standard-output*)
@@ -31,17 +44,15 @@
                            (fmt "~@R" (1+ j)))))))))) )
 
 ;; -------------------------------------------------------------------
-
 ;; don't forget to call as-=keyword to build method discriminant
 (defparameter *default-criterion* "pmem")
+(defparameter *default-bgcolor*   "black")
 
-(defparameter *default-bgcolor* "black")
-
-(defparameter *http-stream* *standard-output*)
+(defparameter *http-stream*       *standard-output*)
 
 ;; set to t to get additional debug messages
-(defparameter *debug*   nil)
-(defparameter *version* "0.1 (10-06-2026)")
+(defparameter *debug*             nil)
+(defparameter *version*           "0.1 (10-06-2026)")
 
 (defun test-read-tsv (&optional (fname "zbxtop.tsv"))
   (with-open-file      (in fname :direction :input)
@@ -53,14 +64,11 @@
               (format t "~&line ~d (~d elements) = '~a' ~%" line-index (length elements) line)
               (when (= line-index 0)
                 (let ((field-positions (loop for field in elements for idx upfrom 0 collect (cons field idx))))
-                  (setq *field-positions* field-positions)
                   (format t "~&~{~a ~}~%" field-positions)))))))
 
-;; split-sequence #\Tab works (tested)
+;;(setq *line* "pid	name	user	pmem	vsize	rss	swap	threads	ctx_switches	cputime_user	cputime_system")
+-;;(test-read-tsv "zbxtop.tsv")
 
-;;(test-read-tsv "zbxtop.tsv")
-
-;; quick conclusion : not awaken enough 
 (defun gen-html-from-tsv (&optional (fname "zbxtop.tsv"))
   (with-open-file      (in fname :direction :input)
     ;; here we will add a wof for output
@@ -73,8 +81,7 @@
                  (when (= line-index 0)
                    (let ((field-positions (loop for field in elements for idx upfrom 0 collect (cons field idx))))
                      (setq *field-positions* field-positions)
-                     (format t "~&~{~a ~}~%" field-positions)
-                     ))))))))
+                     (format t "~&~{~a ~}~%" field-positions)))))))))
 
 ;; object: read a table data 2 level list like below
 
@@ -86,14 +93,14 @@
              :while line
              :collect  (split-sequence #\Tab line))))
 
-
 (defparameter *small-table* '(("pid" "name" "pmem")
                               (1 "init" 0.9)
                               (2 "foo" 3.7)
                               (4 "bar" 4.7)
                               (5 "baz" 1.7)))
 
-(defparameter *table* (read-table-data-from-tsv "zbxtop.tsv"))
+(defparameter *table*       (read-table-data-from-tsv "zbxtop.tsv"))
+
 
 ;; -----------------------------------------------------------------------
 (defgeneric as-keyword (value)
@@ -119,6 +126,7 @@
 (defmethod field-severity-threshold ((field (eql :pmem)) (level (eql :warning)))      1.0)
 (defmethod field-severity-threshold ((field (eql :pmem)) (level (eql :average)))      2.0)
 (defmethod field-severity-threshold ((field (eql :pmem)) (level (eql :high)))         4.0)
+;(field-severity-threshold :pmem :high)
 
 ;; to be replaced by a macro expanded one
 (defun field-value-bgcolor (field value)
@@ -126,45 +134,89 @@
    ((> value (field-severity-threshold field :high))         "red")
    ((> value (field-severity-threshold field :average))      "orange")
    ((> value (field-severity-threshold field :warning))      "yellow")
+
    (t                                                        *default-bgcolor*)))
 
+;(field-value-bgcolor :pmem 9.4)
+
+;; -----------------------------------------------------------------------------------
 ;; works, sort of, sauf que ca colorise 
 ;; and here we are, we have to figure again which field we are processing
 
 ;; to boring for my level of tiredness...
-(defun test-html-table (&key (outfn "test.html") (table *table*))
+(defun write-html-table (&key (outfn "test.html") (table *table*) (ip "127.0.0.1") (criterion "pmem") (memory "16_GB") (ncores 4) (timestamp "<ts undefined>"))
   (let ((header-line (nth 0 table)))
     (with-open-file (out outfn :direction :output :if-exists :supersede)
       (with-html-output (out) ;;*standard-output*)
+        (htm
+         (:header (:meta :http-equiv "refresh" :content 10)
+          (fmt "Getting process data from <b>~a</b>, sorting by <b>~a</b><br>Total memory: <b>~a</b>, #of cpus: <b>~a (~a)</b>" ip criterion memory ncores timestamp))
+ 
+         (:body
+          (:table :border 0 :cellpadding 4
+           (loop :for line-data :in table
+                 :for i         :upfrom 0
+                 :do (htm
+                      (:tr :align "left"
+                       (loop :for item :in line-data
+                             :for j :upfrom 0
+                             :do
+                               (let ((current-field (nth j header-line)) ;;
+                                     ;; FIXME: a bug might arise from "file:// " value
+                                     (value (with-input-from-string (in item)
+                                              (read in nil nil))))
+                                 (when *debug*
+                                   (format t "~& i,j=~d,~d current-field='~a' value='~a' (type ~a)~%" 
+                                           i j current-field value (type-of value)))
+                                 (htm ;; FIXME do better
+                                      (:td :bgcolor (if (and (> i 0)
+                                                             (floatp value))
+                                                        (field-value-bgcolor (as-keyword current-field) value)
+                                                      ;; else
+                                                      *default-bgcolor*)
+                                       (if (zerop i)
+                                           (fmt "<b>~a</b>" item) ;; FIXME: more elegant
+                                         (fmt "~a" item)))) ))))))))))))
+
+;(write-html-table :outfn "out.html"		:table *small-table*)
+;(write-html-table :outfn "/tmp/out.html"	:table *table* :ip "10.23.8.10")
+
+;; bug when data contains what resembles a package name!!
+(defun parse-data-gen-html ()
+  (let ((table (read-table-data-from-tsv #P"/var/tmp/zbxtop/zbxtop.tsv")))
+    (setq *table* table)
+    (write-html-table :outfn "/tmp/out.html" :table *table* :ip "10.23.8.10")
+    ))
+
+;; seems to work
+;(setq *timer*      (mp:make-timer 'parse-data-gen-html))
+;(mp:schedule-timer-relative *timer* 10 10)
+;(mp:unschedule-timer *timer*)
+
+;(read-table-data-from-tsv #P"/var/tmp/zbxtop/zbxtop.tsv")
+;(write-html-table :outfn #P"/tmp/out.html" :table *table* :ip "10.23.8.10")
+;(parse-data-gen-html)
+
+;; --------------------------------------------------------------------------------------------------------------------------------
+;; Work In Progress !!
+(defun generate-complete-page (&key (ip "127.0.0.1") (criterion "pmem") (memory "16_GB") (ncores 4) (timestamp "<ts undefined>"))
+  (with-open-file (out "all.html" :direction :output :if-exists :supersede)
+    (with-html-output (out)
+      (htm
+       (:header (:meta :http-equiv "refresh" :content 10)
+        (fmt "Getting process data from <b>~a</b>, sorting by <b>~a</b><br>Total memory: <b>~a</b>, #of cpus: <b>~a (~a)</b>" ip criterion memory ncores timestamp)
+        )
+       (:body
         (:table :border 0 :cellpadding 4
-         (loop :for line-data :in table
-               :for i         :upfrom 0
-               :do (htm
-                    (:tr :align "left"
-                     (loop :for item :in line-data
-                           :for j :upfrom 0
-                           :do
-                             (let ((current-field (nth j header-line))
-                                   (value (with-input-from-string (in item)
-                                            (read in nil))))
-                               (when *debug*
-                                 (format t "~& i,j=~d,~d current-field='~a' value='~a' (type ~a) ~%" 
-                                         i j current-field value (type-of value)))
-                               (htm ;; FIXME do better
-                                    (:td :bgcolor (if (and (> i 0)
-                                                           (floatp value))
-                                                      (field-value-bgcolor (as-keyword current-field) value)
-                                                    ;; else
-                                                    *default-bgcolor*)
-                                     (if (zerop i)
-                                         (fmt "<b>~a</b>" item) ;; FIXME: more elegant
-                                       (fmt "~a" item)))) ))))))))))
+         (loop for i below 25 by 5
+               do (htm
+                   (:tr :align "right"
+                    (loop for j from i below (+ i 5)
+                          do (htm
+                              (:td :bgcolor (if (oddp j)
+                                                "pink"
+                                              "green")
+                               (fmt "~@R" (1+ j))))))))))))))
 
-;(with-input-from-string (in "   ")  (read in nil))
-
-;(test-html-table :outfn "out.html" :table *small-table*)
-;(test-html-table :outfn "out.html" :table *table*)
-
-;(field-value-bgcolor :pmem 9.4)
-;(field-severity-threshold :pmem :high)
-
+;;(generate-complete-page  :ip "10.23.0.1")
+;;(fresh-line t)
