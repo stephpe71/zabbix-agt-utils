@@ -6,10 +6,22 @@
 ;;
 ;; (C) June 2026 Stephane Perrot
 ;; -------------------------------------------------------------------
+;; The idea of this 'module' is to schedule a timer/function
+;; that regularly checks/parse TSV data file produced by 
+;; zbxtop.sh script (data collector)
+;; then generate an auto-refreshing html table (out.html for now)
+;; WHY 2 separate processes:
+;;
+;; data collection is much simpler in a shell (zabbix-get + mlr + jq 
+;; + tabulate machinery)
+;; the moment I looked at least, html colorization according to
+;; field/value seemed simpler to code in CL (partly because of 
+;; CL-WHO library, partly because of CLOS flexibility ...)
+;; -------------------------------------------------------------------
 ;; TODO:
 ;; - *default-bgcolor* should handle dark-theme and light-theme
 ;; - periodic call of table
-;; - renaming
+;; - RENAMING module
 ;; -------------------------------------------------------------------
 ;; BUGS:
 ;; Depending of loading, split-sequence as used here
@@ -24,11 +36,15 @@
 
 (in-package :TEST-WHO)
 
-(defparameter *data-dir*	#P"/var/tmp/zbxtop")
+(defparameter *data-dir*		#P"/var/tmp/zbxtop/")
+(defparameter *data-file-name*		#P"zbxtop.tsv")
 
-(defparameter *delay*		10) ;; must match the one defined in zbxtop.sh
+(defparameter *output-dir*		#P"/tmp/")
+(defparameter *output-file-name*	#P"out.html")
+(defparameter *output-pathname*		#.(merge-pathnames *output-dir* *output-file-name*))
 
-(defparameter *timer*		nil) ;; object used by mp:schedule-timer ...
+(defparameter *delay*			10) ;; must match the one defined in zbxtop.sh
+(defparameter *timer*			nil) ;; object used by mp:schedule-timer ...
 
 ;; -------------------------------------------------------------------
 ;; don't forget to call as-=keyword to build method discriminant
@@ -39,7 +55,7 @@
 
 ;; set to t to get additional debug messages
 (defparameter *debug*             nil)
-(defparameter *version*           "0.2 (03-07-2026)")
+(defparameter *version*           "0.4 (06-07-2026)")
 
 (defun test-read-tsv (&optional (fname "zbxtop.tsv"))
   (with-open-file      (in fname :direction :input)
@@ -88,8 +104,8 @@
 
 (defparameter *table*       (read-table-data-from-tsv "zbxtop.tsv"))
 
-
 ;; -----------------------------------------------------------------------
+;; Utilities
 (defgeneric as-keyword (value)
   (:documentation "return value as a keyword"))
 
@@ -98,24 +114,34 @@
 
 (defmethod as-keyword ((value symbol))
   (intern (string value) :keyword))
-
 ;(as-keyword 'foo)
+
+(defun recent-file-exists-p (filename &optional (max-recent-time-diff 7200))
+  (and (probe-file filename)
+       (let ((now (get-universal-time))
+             (file-modif-time (cl:file-write-date filename)))
+         (let ((diff (- now file-modif-time)))
+           (when (< diff max-recent-time-diff)
+             diff)))))
+
+;; -----------------------------------------------------------------------
+;; generic function machinery 
 
 ;; field = pmem, threads, ...
 ;; level = :warning, :high :critical
 (defgeneric field-severity-threshold (field level)
   (:documentation "returns the threshold value for given filed (eg 'pmem') and severity level"))
 
-(defmethod field-severity-threshold ((field t) (level (eql :warning)))      999999999.0)
-(defmethod field-severity-threshold ((field t) (level (eql :average)))      999999998.0)
-(defmethod field-severity-threshold ((field t) (level (eql :high)))         999999997.0)
+(defmethod field-severity-threshold ((field t)		(level (eql :warning)))		999999999.0)
+(defmethod field-severity-threshold ((field t)		(level (eql :average)))		999999998.0)
+(defmethod field-severity-threshold ((field t)		(level (eql :high)))		999999997.0)
 
-(defmethod field-severity-threshold ((field (eql :pmem)) (level (eql :warning)))      1.0)
-(defmethod field-severity-threshold ((field (eql :pmem)) (level (eql :average)))      2.0)
-(defmethod field-severity-threshold ((field (eql :pmem)) (level (eql :high)))         4.0)
+(defmethod field-severity-threshold ((field (eql :pmem)) (level (eql :warning)))	1.0)
+(defmethod field-severity-threshold ((field (eql :pmem)) (level (eql :average)))	2.0)
+(defmethod field-severity-threshold ((field (eql :pmem)) (level (eql :high)))		4.0)
 ;(field-severity-threshold :pmem :high)
 
-;; to be replaced by a macro expanded one
+;; FIXME: put a macro expanded ??
 (defun field-value-bgcolor (field value)
   (cond
    ((> value (field-severity-threshold field :high))         "red")
@@ -125,10 +151,30 @@
    (t                                                        *default-bgcolor*)))
 
 ;(field-value-bgcolor :pmem 9.4)
+;; patterns be '((:high . "red") (:average . "red") 
+;(loop for x in '(a b c) for i upfrom 1 collect (cons x i) into res finally (return (cons (cons 'z 0) res)))
+
+;; WORTH the effort???? (does not seem any clearer than the original)
+(defmacro define-field-value-comparison-function (couples)
+  `(defun field-value-bgcolor (field value)
+     (cond
+      ,@(loop :for (level . color) :in (reverse couples)
+	      :collect 
+                `((> value (field-severity-threshold field ,level)) ,color) :into result
+              :finally (return (nreverse (cons `(t *default-bgcolor*) result)))))))
+
+;; seems to 
+;(pprint  (macroexpand-1  '(define-field-value-comparison-function ((:high . "red") (:average . "orange") (:warning . "yellow")) )) *terminal-io*)
 
 ;; -----------------------------------------------------------------------------------
 ;; works, sort of, sauf que ca colorise 
 ;; and here we are, we have to figure again which field we are processing
+
+(defun fdf-cb (file-name fdf-handle)
+  (declare (ignore fdf-handle))
+  (format *terminal-io* "~& fdf-cb called file-name='~a' ~%" file-name))
+
+;(time (hcl:fast-directory-files #P"/tmp/" 'fdf-cb))
 
 ;; to boring for my level of tiredness...
 (defun write-html-table (&key (outfn "test.html") (table *table*) (ip "127.0.0.1") (criterion "pmem") (memory "16_GB") (ncores 4) (timestamp "<ts undefined>"))
@@ -170,17 +216,29 @@
 
 ;; bug when data contains what resembles a package name!!
 (defun parse-data-gen-html ()
-  (let ((table (read-table-data-from-tsv #P"/var/tmp/zbxtop/zbxtop.tsv")))
-    (setq *table* table)
-    (write-html-table :outfn "/tmp/out.html" :table *table* :ip "10.23.8.10")
-    ))
-
-;; seems to work (exept data bugà
-;(setq *timer*      (mp:make-timer 'parse-data-gen-html))
-;(mp:schedule-timer-relative *timer* 10 10)
-;(mp:unschedule-timer *timer*)
+  (let ((data-file-pathname (merge-pathnames *data-dir* *data-file-name*)))
+    (if (recent-file-exists-p data-file-pathname)
+      (let ((table (read-table-data-from-tsv  data-file-pathname)))
+        (setq *table* table)
+        (write-html-table :outfn *output-pathname* :table *table* :ip "10.23.8.10"))
+      ;; else
+      (format *terminal-io* "~&No sufficiently recent TSV data file found !~%"))))
 
 ;(read-table-data-from-tsv #P"/var/tmp/zbxtop/zbxtop.tsv")
 ;(write-html-table :outfn #P"/tmp/out.html" :table *table* :ip "10.23.8.10")
 ;(parse-data-gen-html)
 
+(defun schedule-parsing-and-generation ()
+  (let ((timer (mp:make-timer #'parse-data-gen-html))) ;; assoc between func and timer object
+    (setq *timer* timer)
+    (mp:schedule-timer-relative *timer* *delay* *delay*)))
+
+(defun unschedule-parsing-and-generation ()
+  (when *timer*
+    (mp:unschedule-timer *timer*)
+    (setq *timer* nil)))
+
+;; ------------------------------------------------------------------------------
+;; MAIN 
+
+;(schedule-parsing-and-generation)
