@@ -19,8 +19,8 @@
 ;; CL-WHO library, partly because of CLOS flexibility ...)
 ;; -------------------------------------------------------------------
 ;; TODO:
+;; - DONE periodic call of table;
 ;; - *default-bgcolor* should handle dark-theme and light-theme
-;; - periodic call of table
 ;; - RENAMING module
 ;; -------------------------------------------------------------------
 ;; BUGS:
@@ -41,10 +41,12 @@
 
 (defparameter *output-dir*		#P"/tmp/")
 (defparameter *output-file-name*	#P"out.html")
-(defparameter *output-pathname*		#.(merge-pathnames *output-dir* *output-file-name*))
+(defparameter *output-pathname*		(load-time-value (merge-pathnames *output-dir* *output-file-name*)))
 
 (defparameter *delay*			10) ;; must match the one defined in zbxtop.sh
 (defparameter *timer*			nil) ;; object used by mp:schedule-timer ...
+
+(defparameter *recent-file-limit*	#.(* 2 60 60)) ;; object used by mp:schedule-timer ...
 
 ;; -------------------------------------------------------------------
 ;; don't forget to call as-=keyword to build method discriminant
@@ -55,7 +57,7 @@
 
 ;; set to t to get additional debug messages
 (defparameter *debug*             nil)
-(defparameter *version*           "0.4 (06-07-2026)")
+(defparameter *version*           "0.5 (08-07-2026)")
 
 (defun test-read-tsv (&optional (fname "zbxtop.tsv"))
   (with-open-file      (in fname :direction :input)
@@ -82,8 +84,7 @@
              :do 
                (let* ((elements (split-sequence #\Tab line)))
                  (when (= line-index 0)
-                   (let ((field-positions (loop for field in elements for idx upfrom 0 collect (cons field idx))))
-                     (setq *field-positions* field-positions)
+                   (let ((field-positions (loop for field in elements for idx upfrom 0 collect (cons field (setq *field-positions* field-positions)
                      (format t "~&~{~a ~}~%" field-positions)))))))))
 
 ;; object: read a table data 2 level list like below
@@ -95,12 +96,6 @@
        (loop :for line = (read-line in nil nil)
              :while line
              :collect  (split-sequence #\Tab line))))
-
-(defparameter *small-table* '(("pid" "name" "pmem")
-                              (1 "init" 0.9)
-                              (2 "foo" 3.7)
-                              (4 "bar" 4.7)
-                              (5 "baz" 1.7)))
 
 (defparameter *table*       (read-table-data-from-tsv "zbxtop.tsv"))
 
@@ -116,7 +111,7 @@
   (intern (string value) :keyword))
 ;(as-keyword 'foo)
 
-(defun recent-file-exists-p (filename &optional (max-recent-time-diff 7200))
+(defun recent-file-exists-p (filename &optional (max-recent-time-diff *recent-file-limit*))
   (and (probe-file filename)
        (let ((now (get-universal-time))
              (file-modif-time (cl:file-write-date filename)))
@@ -177,13 +172,13 @@
 ;(time (hcl:fast-directory-files #P"/tmp/" 'fdf-cb))
 
 ;; to boring for my level of tiredness...
-(defun write-html-table (&key (outfn "test.html") (table *table*) (ip "127.0.0.1") (criterion "pmem") (memory "16_GB") (ncores 4) (timestamp "<ts undefined>"))
+(defun write-html-table (&key (outfn "test.html") (table *table*) (ip "127.0.0.1") (criterion "pmem") (memory "16_GB") (ncores 4) (timestamp "undefined"))
   (let ((header-line (nth 0 table)))
     (with-open-file (out outfn :direction :output :if-exists :supersede)
       (with-html-output (out) ;;*standard-output*)
         (htm
          (:header (:meta :http-equiv "refresh" :content 10)
-          (fmt "Getting process data from <b>~a</b>, sorting by <b>~a</b><br>Total memory: <b>~a</b>, #of cpus: <b>~a (~a)</b>" ip criterion memory ncores timestamp))
+          (fmt "Getting process data from <b>~a</b>, sorting by <b>~a</b><br>Total memory: <b>~a</b>, #of cpus: <b>~a</b> (data time: ~a)</b>" ip criterion memory ncores timestamp))
  
          (:body
           (:table :border 0 :cellpadding 4
@@ -211,16 +206,25 @@
                                            (fmt "<b>~a</b>" item) ;; FIXME: more elegant
                                          (fmt "~a" item)))) ))))))))))))
 
-;(write-html-table :outfn "out.html"		:table *small-table*)
 ;(write-html-table :outfn "/tmp/out.html"	:table *table* :ip "10.23.8.10")
 
-;; bug when data contains what resembles a package name!!
+;(my-time-stamp (file-write-date "/tmp/out.html"))
+
+;; FIXME: bother about TZ maybe
+(defun my-time-stamp (universal-time)
+  (multiple-value-bind (sec min hour day month year)
+      (decode-universal-time universal-time)
+    (format nil "~2,'0d-~2,'0d-~d ~2,'0d:~2,'0d:~2,'0d" day month year hour min sec)))
+
+    ;; bug when data contains what resembles a package name!!
 (defun parse-data-gen-html ()
   (let ((data-file-pathname (merge-pathnames *data-dir* *data-file-name*)))
     (if (recent-file-exists-p data-file-pathname)
-      (let ((table (read-table-data-from-tsv  data-file-pathname)))
+      (let ((table (read-table-data-from-tsv  data-file-pathname))
+            ;; FIXME: could not be used again
+            (ts (my-time-stamp (file-write-date data-file-pathname))))
         (setq *table* table)
-        (write-html-table :outfn *output-pathname* :table *table* :ip "10.23.8.10"))
+        (write-html-table :outfn *output-pathname* :table *table* :ip "10.23.8.10" :timestamp ts))
       ;; else
       (format *terminal-io* "~&No sufficiently recent TSV data file found !~%"))))
 
@@ -228,12 +232,12 @@
 ;(write-html-table :outfn #P"/tmp/out.html" :table *table* :ip "10.23.8.10")
 ;(parse-data-gen-html)
 
-(defun schedule-parsing-and-generation ()
-  (let ((timer (mp:make-timer #'parse-data-gen-html))) ;; assoc between func and timer object
-    (setq *timer* timer)
-    (mp:schedule-timer-relative *timer* *delay* *delay*)))
+  (defun schedule-parsing-and-generation ()
+    (let ((timer (mp:make-timer 'parse-data-gen-html))) ;; assoc between func and timer object
+      (setq *timer* timer)
+      (mp:schedule-timer-relative *timer* *delay* *delay*)))
 
-(defun unschedule-parsing-and-generation ()
+  (defun unschedule-parsing-and-generation ()
   (when *timer*
     (mp:unschedule-timer *timer*)
     (setq *timer* nil)))
@@ -242,3 +246,4 @@
 ;; MAIN 
 
 ;(schedule-parsing-and-generation)
+;(unschedule-parsing-and-generation)
