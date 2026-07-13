@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/env zsh
 # ==============================================================================
 # On va le laisser en bash
 # 
@@ -14,17 +14,11 @@
 # - vérifier les unités
 # Affichage avec awk
 # - OK l'index du critere de tri peut etre recupérer
+#
 # Dispatch de la liste des critere seli
+#
 # ==============================================================================
 # Variables
-
-# On met la dest en 2eme parametre
-ZBXHOST=${1:-127.0.0.1}
-
-# pourrait
-CRITERION=${2:-pmem}
-
-NLINES=${3:-10}
 
 CPU_FIELDS_LIN="pid,name,pmem,vsize,rss,cputime_user,cputime_system,threads,ctx_switches"
 #CPU_FIELDS_LIN_LONG="ppid,pid,name,user,pmem,vsize,rss,swap,threads,ctx_switches,cputime_user,cputime_system"
@@ -42,34 +36,42 @@ DIRNAME=$( dirname  $0)
 RECORD_DIR=/var/tmp
 
 RECORD_DIR=/var/tmp/multi_hosts/$ZBXHOST
-VERSION="0.9b (29-05-2026)"
+# TO BE verbessert (simple place now for communication with lisp program)
+DATA_DIR=/var/tmp/zbxtop
 
+VERSION="0.9c (03-07-2026)"
+
+GRID_STYLE=simple
 GRID_STYLE=fancy_grid
 
 # Or to use a modulo for saving the file?
 DELAY=10
 
-for fname in utils.sh colorlib.sh
-do	     
-    filepath=${DIRNAME}/${fname}
-    [[ -r $filepath ]] && source $filepath
-done
+#DEBUG=1
+DEBUG=""
 
 # ==============================================================================
 # Fonctions
 
 # $PROGNAME -n NLINES criterion
 function usage {
+    
     cat <<EOF
 
         $PROGNAME: usage:
 
-        $PROGNAME [ip-or-host [criterion [[NLINES]]]]
+        $PROGNAME [-html] [ip-or-host [criterion [[NLINES]]]]
 
         where criterion is one of
         pmem vsize rss cputime_user cputime_system
 
+	-html: additionally generates html data, view with elinks zbxtop.html
+
 EOF
+}
+
+function cleanup {
+    [[ -z $DEBUG ]] && rm -f zbxtop.html ${DATA_DIR}/zbxtop.tsv
 }
 
 function criterion_index {
@@ -108,14 +110,18 @@ function check_agent_version_os_type {
 }
 
 # ------------------------------------------------------------------------------
+# HTML generation, trickier than needed
+# Works sort of ...
+# FIXME: should be much more abstract and clean !!
+# Now we have to add color depending on value...
 function emit_html_prelude {
     cat <<EOF
 <html>
   <head>
     <meta http-equiv="refresh" content="10">
-    Getting process data from <b>127.0.0.1</b>, sorting by <b>pmem</b>
+    Getting process data from <b>${ZBXHOST}</b>, sorting by <b>${CRITERION}</b>
     <br>
-    Total memory: <b>16 GB</b>, # of cpus: <b>8</b>
+    Total memory: <b>${TOTMEM}</b>, #of cpus: <b>${NCORES} ($(date +%X))</b>
   </head>
   <body>
 EOF
@@ -128,10 +134,10 @@ function emit_html_postlude {
 EOF
 }
 
-
 function tsv2htbl_genhdr {
     echo -n "      <tr>"
-    head -1 zbxtop.tsv | \
+    # FIXME: disparition of last field!!
+    head -1 ${DATA_DIR}/zbxtop.tsv | \
 	while read -d '	' field
 	do
 	    echo -n "<th>${field}</th>"
@@ -139,18 +145,43 @@ function tsv2htbl_genhdr {
     echo "</tr>"
 }
 
+# BETTER CODED IN lisp ?
+# here we have to add add hoc colorization ...
+# Is working on html right way of doing it ?
 function tsv2htbl_genrows {
     # a while line should be inserted here
+    local color=white
+    local bgcolor=black
+    
     while read -u 3 line
     do
 	# At this point we have the '\t'
+	colindex=1
         echo -n "       <tr>"
 	echo "$line" | while read -d '	' value
 	do
-	    echo -n "<td>${value}</td>"
+	    # HOW TO DO THAT BETTER?
+	    if [[ $colindex -eq $CRITERION_INDEX ]]; then
+		# simplistic for now
+		# FIXME: does bash handle float => NO, use zsh for now
+		# FIXME: factorize and more generic
+		if   [[ $value -gt 4 ]]; then
+		    bgcolor="red"
+		elif [[ $value -gt 2.5 ]]; then
+		    bgcolor="orange"
+		elif [[ $value -gt 1.6 ]]; then
+		    bgcolor="yellow"
+		else
+		    bgcolor="black"
+		fi
+		echo -n "<td style=\"color:${color};\" bgcolor=\"${bgcolor}\">${value}</td>"
+	    else # standard ...
+		echo -n "<td>${value}</td>"
+	    fi
+	    ((colindex+=1))
 	done
         echo "</tr>"
-    done 3< <(tail -n +2 zbxtop.tsv)
+    done 3< <(tail -n +2 ${DATA_DIR}/zbxtop.tsv)
 }
 
 function tsv2htbl {
@@ -163,22 +194,48 @@ function tsv2htbl {
 }
 
 # ==============================================================================
+# foo; bar; baz
 [[ $1 = "-h" ]] && usage && exit 0
 [[ $1 = "-V" ]] && echo "$VERSION" && exit 0
 [[ $1 = "-r" ]] && DO_RECORD=1 && shift
+
+[[ $1 = "-html" ]] && DO_HTML_GEN=1 && shift
+
+# On met la dest en 2eme parametre
+ZBXHOST=${1:-127.0.0.1}
+
+# pourrait
+CRITERION=${2:-pmem}
+
+NLINES=${3:-10}
+
+for fname in utils.sh colorlib.sh
+do	     
+    filepath=${DIRNAME}/${fname}
+    [[ -r $filepath ]] && source $filepath
+done
 
 check_commands_prerequisites
 check_agent_version_os_type
 
 #[[ -n $DO_RECORD ]] && mkdir -p $RECORD_DIR
-mkdir -p $RECORD_DIR
+mkdir -p $RECORD_DIR $DATA_DIR
 
-awk_index="$(criterion_index $CRITERION)"
+CRITERION_INDEX="$(criterion_index $CRITERION)"
+#echo CRITERION_INDEX=$AWK_INDEX
 
-totmem=$(zabbix_get -s $ZBXHOST -k vm.memory.size[total] )
+
+totmem=$(zabbix_get -s $ZBXHOST -k 'vm.memory.size[total]' )
+TOTMEM=$(convert_to_suffix $totmem)
+
+
+# When za cache empty, no value => warm up, the horrible way 
+zabbix_get -s $ZBXHOST -k 'system.cpu.num[online]' >/dev/null 
+sleep 1
+
 #FIXME? system.cpu.num cannot be retrieved shortly after boot
 #(agent cache now filled up yet?) => disgracefull errort messages displayed
-ncores=$(zabbix_get -s $ZBXHOST -k system.cpu.num[online])
+NCORES=$(zabbix_get -s $ZBXHOST -k 'system.cpu.num[online]')
 
 #echo ncores=$ncores
 while true
@@ -187,7 +244,7 @@ do
 
     # Plain $BRIGHT works, too...
     echo "# Getting process data from $(colored $ZBXHOST $RED), sorting by $(colored $CRITERION $YELLOW) ..."
-    echo "# Total memory: $(colored $(convert_to_suffix $totmem) $GREEN), # of cpus: $(colored $ncores $BLUE)"
+    echo "# Total memory: $(colored $TOTMEM $GREEN), # of cpus: $(colored $NCORES $BLUE)"
     
     timestamp=$(date +%s)
     tmpfile=${RECORD_DIR}/${timestamp}_proc-get.json
@@ -197,21 +254,20 @@ do
 
     # HOW TO add a value specific
     # Apres le .[] on a un objet json par ligne unix (d'ou le head qui fonctionne)
-    # HTML :
-
     # HTML : Candidate line for transforming tsb into html table ... works, sort of (of to refresh ?)
-    #cat zbxtop.tsv | ~/src/tabulate/tabulate.sh -t "Zbxtop Data" -h "Getting data from 127.0.0.1, sorting by pmem" > test3.html
+    #cat ${DATA_DIR}/zbxtop.tsv | ~/src/tabulate/tabulate.sh -t "Zbxtop Data" -h "Getting data from 127.0.0.1, sorting by pmem" > test3.html
 
     #FIXME: Quoting of values
     cat $tmpfile | \
 	jq -cM ". | sort_by(.${CRITERION}) | reverse | .[] | {$CPU_FIELDS}" | \
 	#head -n $NLINES | mlr --j2t cat | tabulate --sep="\t" -1 -f $GRID_STYLE | tee zbxtop.out
-	head -n $NLINES | mlr --j2t cat | tee zbxtop.tsv | tabulate --sep="\t" -1 -f $GRID_STYLE
+	head -n $NLINES | mlr --j2t cat | tee ${DATA_DIR}/zbxtop.tsv | tabulate --sep="\t" -1 -f $GRID_STYLE
 
-    tsv2htbl > zbxtop.html
+    [[ ! -z $DO_HTML_GEN ]] && tsv2htbl > zbxtop.html
 
     sleep $DELAY
 
 done
+
 
 
