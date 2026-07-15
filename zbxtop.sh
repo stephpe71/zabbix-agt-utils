@@ -39,7 +39,7 @@ RECORD_DIR=/var/tmp/multi_hosts/$ZBXHOST
 # TO BE verbessert (simple place now for communication with lisp program)
 DATA_DIR=/var/tmp/zbxtop
 
-VERSION="0.9c (03-07-2026)"
+VERSION="0.9d (15-07-2026)"
 
 GRID_STYLE=simple
 GRID_STYLE=fancy_grid
