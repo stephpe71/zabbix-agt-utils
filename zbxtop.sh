@@ -230,12 +230,12 @@ TOTMEM=$(convert_to_suffix $totmem)
 
 
 # When za cache empty, no value => warm up, the horrible way 
-zabbix_get -s $ZBXHOST -k 'system.cpu.num[online]' >/dev/null 
-sleep 1
-
-#FIXME? system.cpu.num cannot be retrieved shortly after boot
-#(agent cache now filled up yet?) => disgracefull errort messages displayed
 NCORES=$(zabbix_get -s $ZBXHOST -k 'system.cpu.num[online]')
+
+if [[ $NCORES =~ "ZBX_NOTSUPPORTED" ]]; then
+    sleep 1
+    NCORES=$(zabbix_get -s $ZBXHOST -k 'system.cpu.num[online]')
+fi
 
 #echo ncores=$ncores
 while true
