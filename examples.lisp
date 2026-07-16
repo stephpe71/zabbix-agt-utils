@@ -48,16 +48,16 @@
 
 (defparameter *recent-file-limit*	#.(* 2 60 60)) ;; object used by mp:schedule-timer ...
 
-;; -------------------------------------------------------------------
-;; don't forget to call as-=keyword to build method discriminant
+;; don't forget to call as-=keyword to build method discriminant...
 (defparameter *default-criterion* "pmem")
 (defparameter *default-bgcolor*   "black")
 
 (defparameter *http-stream*       *standard-output*)
 
+;; -------------------------------------------------------------------
 ;; set to t to get additional debug messages
 (defparameter *debug*             nil)
-(defparameter *version*           "0.5 (08-07-2026)")
+(defparameter *version*           "0.5b (16-07-2026)")
 
 (defun test-read-tsv (&optional (fname "zbxtop.tsv"))
   (with-open-file      (in fname :direction :input)
@@ -84,8 +84,10 @@
              :do 
                (let* ((elements (split-sequence #\Tab line)))
                  (when (= line-index 0)
-                   (let ((field-positions (loop for field in elements for idx upfrom 0 collect (cons field (setq *field-positions* field-positions)
-                     (format t "~&~{~a ~}~%" field-positions)))))))))
+                   (let ((field-positions
+                          (loop :for field :in elements
+                                :for idx :upfrom 0 :collect (cons field (setq *field-positions* field-positions)
+                     (format t "~&~{~a ~}~%" field-positions)))))))))))))
 
 ;; object: read a table data 2 level list like below
 
@@ -178,7 +180,8 @@
       (with-html-output (out) ;;*standard-output*)
         (htm
          (:header (:meta :http-equiv "refresh" :content 10)
-          (fmt "Getting process data from <b>~a</b>, sorting by <b>~a</b><br>Total memory: <b>~a</b>, #of cpus: <b>~a</b> (data time: ~a)</b>" ip criterion memory ncores timestamp))
+          (fmt "Getting process data from <b>~a</b>, sorting by <b>~a</b><br>Total memory: <b>~a</b>, #of cpus: <b>~a</b> (data time: ~a)</b>"
+               ip criterion memory ncores timestamp))
  
          (:body
           (:table :border 0 :cellpadding 4
@@ -191,13 +194,16 @@
                              :do
                                (let ((current-field (nth j header-line)) ;;
                                      ;; FIXME: a bug might arise from "file:// " value
+                                     ;; ignore-errors? => nil when errors
+
                                      (value (with-input-from-string (in item)
-                                              (read in nil nil))))
+                                              (ignore-errors (read in nil nil)))))
                                  (when *debug*
                                    (format t "~& i,j=~d,~d current-field='~a' value='~a' (type ~a)~%" 
                                            i j current-field value (type-of value)))
                                  (htm ;; FIXME do better
                                       (:td :bgcolor (if (and (> i 0)
+                                                             value
                                                              (floatp value))
                                                         (field-value-bgcolor (as-keyword current-field) value)
                                                       ;; else
@@ -206,7 +212,7 @@
                                            (fmt "<b>~a</b>" item) ;; FIXME: more elegant
                                          (fmt "~a" item)))) ))))))))))))
 
-;(write-html-table :outfn "/tmp/out.html"	:table *table* :ip "10.23.8.10")
+;(write-html-table :outfn "/tmp/out.html" :table *table* :ip "10.23.8.10")
 
 ;(my-time-stamp (file-write-date "/tmp/out.html"))
 
@@ -232,18 +238,19 @@
 ;(write-html-table :outfn #P"/tmp/out.html" :table *table* :ip "10.23.8.10")
 ;(parse-data-gen-html)
 
-  (defun schedule-parsing-and-generation ()
-    (let ((timer (mp:make-timer 'parse-data-gen-html))) ;; assoc between func and timer object
-      (setq *timer* timer)
-      (mp:schedule-timer-relative *timer* *delay* *delay*)))
+(defun schedule-parsing-and-generation ()
+  (let ((timer (mp:make-timer 'parse-data-gen-html))) ;; assoc between func and timer object
+    (setq *timer* timer)
+    (mp:schedule-timer-relative *timer* *delay* *delay*)))
 
-  (defun unschedule-parsing-and-generation ()
+(defun unschedule-parsing-and-generation ()
   (when *timer*
     (mp:unschedule-timer *timer*)
     (setq *timer* nil)))
 
 ;; ------------------------------------------------------------------------------
 ;; MAIN 
-
 ;(schedule-parsing-and-generation)
 ;(unschedule-parsing-and-generation)
+
+
