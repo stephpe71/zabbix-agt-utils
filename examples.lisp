@@ -49,15 +49,21 @@
 (defparameter *recent-file-limit*	#.(* 2 60 60)) ;; object used by mp:schedule-timer ...
 
 ;; don't forget to call as-=keyword to build method discriminant...
-(defparameter *default-criterion* "pmem")
-(defparameter *default-bgcolor*   "black")
+(defparameter *default-criterion*	"pmem")
+(defparameter *default-bgcolor*   	"black")
 
-(defparameter *http-stream*       *standard-output*)
+(defparameter *http-stream*       	*standard-output*)
+
+(defconstant +header-format-string-bold+ "Getting process data from <b>~a</b>, sorting by <b>~a</b><br>Total memory: <b>~a</b>, #of cpus: <b>~a</b> (data time: ~a)</b>")
+
+;; same using <span> instead of <b>   <span style='color:orange;'>~a</span>
+(defconstant +header-format-string-colored+ "Getting process data from <span style='color:red;'>~a</span>, sorting by <span style='color:orange;'>~a</span><br>Total memory: <span style='color:green;'>~a</span>, #of cpus: <span style='color:blue;'>~a</span> (data time: ~a)</b>")
+
 
 ;; -------------------------------------------------------------------
 ;; set to t to get additional debug messages
 (defparameter *debug*             nil)
-(defparameter *version*           "0.5b (16-07-2026)")
+(defparameter *version*           "0.5c (24-07-2026)")
 
 (defun test-read-tsv (&optional (fname "zbxtop.tsv"))
   (with-open-file      (in fname :direction :input)
@@ -138,7 +144,7 @@
 (defmethod field-severity-threshold ((field (eql :pmem)) (level (eql :high)))		4.0)
 ;(field-severity-threshold :pmem :high)
 
-;; FIXME: put a macro expanded ??
+*;; FIXME: put a macro expanded ??
 (defun field-value-bgcolor (field value)
   (cond
    ((> value (field-severity-threshold field :high))         "red")
@@ -177,10 +183,10 @@
 (defun write-html-table (&key (outfn "test.html") (table *table*) (ip "127.0.0.1") (criterion "pmem") (memory "16_GB") (ncores 4) (timestamp "undefined"))
   (let ((header-line (nth 0 table)))
     (with-open-file (out outfn :direction :output :if-exists :supersede)
-      (with-html-output (out) ;;*standard-output*)
+      (with-html-output (out)
         (htm
          (:header (:meta :http-equiv "refresh" :content 10)
-          (fmt "Getting process data from <b>~a</b>, sorting by <b>~a</b><br>Total memory: <b>~a</b>, #of cpus: <b>~a</b> (data time: ~a)</b>"
+          (fmt +header-format-string-colored+
                ip criterion memory ncores timestamp))
  
          (:body
