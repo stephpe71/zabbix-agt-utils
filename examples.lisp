@@ -57,13 +57,12 @@
 (defconstant +header-format-string-bold+ "Getting process data from <b>~a</b>, sorting by <b>~a</b><br>Total memory: <b>~a</b>, #of cpus: <b>~a</b> (data time: ~a)</b>")
 
 ;; same using <span> instead of <b>   <span style='color:orange;'>~a</span>
-(defconstant +header-format-string-colored+ "Getting process data from <span style='color:red;'>~a</span>, sorting by <span style='color:orange;'>~a</span><br>Total memory: <span style='color:green;'>~a</span>, #of cpus: <span style='color:blue;'>~a</span> (data time: ~a)</b>")
-
+(defconstant +header-format-string-colored+ "Getting process data from <span style='color:red;'>~a</span>, sorting by <span style='color:orange;'>~a</span><br>Total memory: <span style='color:green;'>~a</span>, #of cpus: <span style='color:blue;'>~a</span> (data written ~a ago)</b>")
 
 ;; -------------------------------------------------------------------
 ;; set to t to get additional debug messages
 (defparameter *debug*             nil)
-(defparameter *version*           "0.5c (24-07-2026)")
+(defparameter *version*           "0.5d (24-07-2026 afternoon)")
 
 (defun test-read-tsv (&optional (fname "zbxtop.tsv"))
   (with-open-file      (in fname :direction :input)
@@ -118,6 +117,41 @@
 (defmethod as-keyword ((value symbol))
   (intern (string value) :keyword))
 ;(as-keyword 'foo)
+
+;; -----------------------------------------------------------------------
+
+(defconstant +seconds-in-one-minute+	60)
+(defconstant +seconds-in-one-hour+	(* 60 60))
+(defconstant +seconds-in-a-day+		(* +seconds-in-one-hour+ 24))
+
+;; FIXME: avoid repeating the pattern 4 times ...
+(defun time-diff-as-days-hours-minutes (time-diff)
+  (let* ((rem time-diff)
+        (ndays (floor (/ rem +seconds-in-a-day+))))
+
+    (let* ((rem (- rem (* ndays +seconds-in-a-day+)))
+          (nhours (floor (/ rem +seconds-in-one-hour+))))
+
+      (let* ((rem (- rem (* nhours +seconds-in-one-hour+)))
+            (nminutes (floor (/ rem +seconds-in-one-minute+))))
+
+        (let* ((nseconds (- rem (* nminutes +seconds-in-one-minute+))))
+
+          (values ndays nhours nminutes nseconds))))))
+
+; HERE we have to define a fancy format string to express time-diff
+;; not displaying days or seconds when 
+;; WORK IN PPROGRESS
+;; HANDLE plural
+(defparameter +time-diff-as-days-hours-minutes-format-string+ "~r day~:p, ~r hour~:p ~r minute~:p and ~r second~:p")
+
+;; SEEMS TO BE OK
+(defun time-diff-as-fancy-string (time-diff) ;; in seconds
+  (multiple-value-bind (ndays nhours nminutes nseconds) (time-diff-as-days-hours-minutes time-diff)
+    (format nil +time-diff-as-days-hours-minutes-format-string+ 
+            ndays nhours nminutes nseconds)))
+
+;;(time-diff-as-fancy-string 50000)
 
 (defun recent-file-exists-p (filename &optional (max-recent-time-diff *recent-file-limit*))
   (and (probe-file filename)
@@ -228,17 +262,22 @@
       (decode-universal-time universal-time)
     (format nil "~2,'0d-~2,'0d-~d ~2,'0d:~2,'0d:~2,'0d" day month year hour min sec)))
 
-    ;; bug when data contains what resembles a package name!!
+(defun my-time-diff (file-write-date-ut)
+  (let ((time-diff (- (get-universal-time) file-write-date-ut)))
+    (time-diff-as-fancy-string time-diff)))
+
+;; bug when data contains what resembles a package name!!
 (defun parse-data-gen-html ()
   (let ((data-file-pathname (merge-pathnames *data-dir* *data-file-name*)))
     (if (recent-file-exists-p data-file-pathname)
       (let ((table (read-table-data-from-tsv  data-file-pathname))
             ;; FIXME: could not be used again
-            (ts (my-time-stamp (file-write-date data-file-pathname))))
+            ;;(time-indication (my-time-stamp (file-write-date data-file-pathname)))
+            (time-indication (my-time-diff (file-write-date data-file-pathname))))
         (setq *table* table)
-        (write-html-table :outfn *output-pathname* :table *table* :ip "10.23.8.10" :timestamp ts))
+        (write-html-table :outfn *output-pathname* :table *table* :ip "10.23.8.10" :timestamp time-indication))
       ;; else
-      (format *terminal-io* "~&No sufficiently recent TSV data file found !~%"))))
+      (format *terminal-io* "~&No sufficiently recent TSV data file found ~%"))))
 
 ;(read-table-data-from-tsv #P"/var/tmp/zbxtop/zbxtop.tsv")
 ;(write-html-table :outfn #P"/tmp/out.html" :table *table* :ip "10.23.8.10")
