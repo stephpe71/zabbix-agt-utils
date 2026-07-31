@@ -4,7 +4,7 @@
 ;; the purpose of all this if to use htm macro
 ;; to easly colorate cells (more easily than in shell)
 ;;
-;; (C) June 2026 Stephane Perrot
+;; (C) 2026 Stephane Perrot
 ;; -------------------------------------------------------------------
 ;; The idea of this 'module' is to schedule a timer/function
 ;; that regularly checks/parse TSV data file produced by 
@@ -32,7 +32,7 @@
 (in-package :CL-USER)
 
 (defpackage :TEST-WHO
-  (:use :cl :cl-who :split-sequence :mp))
+  (:use :cl :cl-who :split-sequence :mp :pathname-utils))
 
 (in-package :TEST-WHO)
 
@@ -40,29 +40,51 @@
 (defparameter *data-file-name*		#P"zbxtop.tsv")
 
 (defparameter *output-dir*		#P"/tmp/")
-(defparameter *output-file-name*	#P"out.html")
+(defparameter *output-file-name*	#P"zbxtop.html")
 (defparameter *output-pathname*		(load-time-value (merge-pathnames *output-dir* *output-file-name*)))
 
 (defparameter *delay*			10) ;; must match the one defined in zbxtop.sh
-(defparameter *timer*			nil) ;; object used by mp:schedule-timer ...
+(defparameter *timer-name*		'parse-and-gen-timer) ;; timer-name 
+(defvar       *timer*			nil) ;; object used by mp:schedule-timer ...
 
 (defparameter *recent-file-limit*	#.(* 2 60 60)) ;; object used by mp:schedule-timer ...
 
 ;; don't forget to call as-=keyword to build method discriminant...
-(defparameter *default-criterion*	"pmem")
+(defparameter *criterion*	 	"pmem") ;; This is default value
 (defparameter *default-bgcolor*   	"black")
 
 (defparameter *http-stream*       	*standard-output*)
 
+(defparameter *main-ip*       		"127.0.0.1") ;; TO BE VERBESSERT
+
 (defconstant +header-format-string-bold+ "Getting process data from <b>~a</b>, sorting by <b>~a</b><br>Total memory: <b>~a</b>, #of cpus: <b>~a</b> (data time: ~a)</b>")
 
 ;; same using <span> instead of <b>   <span style='color:orange;'>~a</span>
-(defconstant +header-format-string-colored+ "Getting process data from <span style='color:red;'>~a</span>, sorting by <span style='color:orange;'>~a</span><br>Total memory: <span style='color:green;'>~a</span>, #of cpus: <span style='color:blue;'>~a</span> (data written ~a ago)</b>")
+(defconstant +header-format-string-colored+ "Getting process data from <span style='color:red;'>~a</span>, sorting by <span style='color:orange;'>~a</span><br>Total memory: <span style='color:green;'>~a</span>, #of cpus: <span style='color:blue;'>~a</span> (data collected ~a ago)</b>")
+
+;; from PCL
+(defparameter *list-etc* "~#[NONE~;~a~;~a and ~a~:;~a, ~a~]~#[~; and ~a~:;, ~a, etc~].")
+
+;;; and then use it like this:
+
+;;; (format nil *list-etc*)                ==> "NONE." ZERO ARGS
+;;; (format nil *list-etc* 'a)             ==> "A."
+;;; (format nil *list-etc* 'a 'b)          ==> "A and B."
+;;; (format nil *list-etc* 'a 'b 'c)       ==> "A, B and C."
+;;; (format nil *list-etc* 'a 'b 'c 'd)    ==> "A, B, C, etc."
+;;; (format nil *list-etc* 'a 'b 'c 'd 'e) ==> "A, B, C, etc."
+
+;; does a switch case on number of args
+;(format nil "~#[NADA~;FOO~;BAR~;BAZ~]" 1 2 3 4)
+
+;; UNDEF should never be called
+;; let's suppose we start whith seconds ...
+(defparameter *elapsed-time-format-string* "~#[UNDEF~;~d seconds~;~a and ~a~:;~a, ~a~]~#[~; and ~a~:;, ~a, etc~].")
 
 ;; -------------------------------------------------------------------
 ;; set to t to get additional debug messages
 (defparameter *debug*             nil)
-(defparameter *version*           "0.5d (24-07-2026 afternoon)")
+(defparameter *version*           "0.5f (31-07-2026 afternoon)")
 
 (defun test-read-tsv (&optional (fname "zbxtop.tsv"))
   (with-open-file      (in fname :direction :input)
@@ -119,7 +141,6 @@
 ;(as-keyword 'foo)
 
 ;; -----------------------------------------------------------------------
-
 (defconstant +seconds-in-one-minute+	60)
 (defconstant +seconds-in-one-hour+	(* 60 60))
 (defconstant +seconds-in-a-day+		(* +seconds-in-one-hour+ 24))
@@ -139,11 +160,24 @@
 
           (values ndays nhours nminutes nseconds))))))
 
+;; pour faire ca sous forme de loop 
+;; td-ini siad => d
+;; rem  siah => h
+
+;; SOMething along these lines ??
+(defun time-diff-as-days-hours-minutes-as-loop (time-diff)
+  (let ((accu (list))
+        (tmp nil))
+    (declare (ignorable accu tmp))
+    (loop :for seconds-in-unit :in '(86400 3600 60 1)
+          :for seconds-left = time-diff then (- seconds-left (* seconds-in-unit))
+          collect (floor (/ seconds-left seconds-in-unit)))))
+
 ; HERE we have to define a fancy format string to express time-diff
 ;; not displaying days or seconds when 
 ;; WORK IN PPROGRESS
 ;; HANDLE plural
-(defparameter +time-diff-as-days-hours-minutes-format-string+ "~r day~:p, ~r hour~:p ~r minute~:p and ~r second~:p")
+(defparameter +time-diff-as-days-hours-minutes-format-string+ "~r day~:p, ~r hour~:p, ~r minute~:p and ~r second~:p")
 
 ;; SEEMS TO BE OK
 (defun time-diff-as-fancy-string (time-diff) ;; in seconds
@@ -211,10 +245,8 @@
   (declare (ignore fdf-handle))
   (format *terminal-io* "~& fdf-cb called file-name='~a' ~%" file-name))
 
-;(time (hcl:fast-directory-files #P"/tmp/" 'fdf-cb))
-
 ;; to boring for my level of tiredness...
-(defun write-html-table (&key (outfn "test.html") (table *table*) (ip "127.0.0.1") (criterion "pmem") (memory "16_GB") (ncores 4) (timestamp "undefined"))
+(defun write-html-table (&key (outfn "test.html") (table *table*) (ip "127.0.0.1") (criterion *criterion*) (memory "16_GB") (ncores 4) (timestamp "undefined"))
   (let ((header-line (nth 0 table)))
     (with-open-file (out outfn :direction :output :if-exists :supersede)
       (with-html-output (out)
@@ -266,16 +298,29 @@
   (let ((time-diff (- (get-universal-time) file-write-date-ut)))
     (time-diff-as-fancy-string time-diff)))
 
+(defun find-recent-tsv-file (&optional (data-dir *data-dir*))
+  (let ((pattern (lw:string-append (pathname-utils:unix-namestring data-dir) "*.tsv")))
+    ;; FIXME: make sure the most recent one gets selected !!
+    ;; apparently it does !!
+    (lw:when-let (found (directory pattern))
+      (first found))))
+
+(defun find-criterion-from-pn (tsv-file-pathname)
+  (nth 1 (split-sequence #\_ (pathname-name tsv-file-pathname))))
+
 ;; bug when data contains what resembles a package name!!
 (defun parse-data-gen-html ()
-  (let ((data-file-pathname (merge-pathnames *data-dir* *data-file-name*)))
+  (let ((data-file-pathname ;;(merge-pathnames *data-dir* *data-file-name*)
+                            (find-recent-tsv-file *data-dir*)
+                            ))
     (if (recent-file-exists-p data-file-pathname)
       (let ((table (read-table-data-from-tsv  data-file-pathname))
             ;; FIXME: could not be used again
             ;;(time-indication (my-time-stamp (file-write-date data-file-pathname)))
             (time-indication (my-time-diff (file-write-date data-file-pathname))))
         (setq *table* table)
-        (write-html-table :outfn *output-pathname* :table *table* :ip "10.23.8.10" :timestamp time-indication))
+        (setq *criterion* (find-criterion-from-pn data-file-pathname))
+        (write-html-table :outfn *output-pathname* :table *table* :criterion *criterion* :ip "10.23.8.10" :timestamp time-indication))
       ;; else
       (format *terminal-io* "~&No sufficiently recent TSV data file found ~%"))))
 
@@ -286,6 +331,7 @@
 (defun schedule-parsing-and-generation ()
   (let ((timer (mp:make-timer 'parse-data-gen-html))) ;; assoc between func and timer object
     (setq *timer* timer)
+    (setf (mp:timer-name *timer*) *timer-name*)
     (mp:schedule-timer-relative *timer* *delay* *delay*)))
 
 (defun unschedule-parsing-and-generation ()
@@ -293,9 +339,15 @@
     (mp:unschedule-timer *timer*)
     (setq *timer* nil)))
 
+;;
+;;(mp:timer-name *timer*)
+;;
+
 ;; ------------------------------------------------------------------------------
 ;; MAIN 
 ;(schedule-parsing-and-generation)
 ;(unschedule-parsing-and-generation)
+
+;; ------------------------------------------------------------------------------
 
 
