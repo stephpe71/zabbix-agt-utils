@@ -59,6 +59,8 @@
 
 (defconstant +header-format-string-bold+ "Getting process data from <b>~a</b>, sorting by <b>~a</b><br>Total memory: <b>~a</b>, #of cpus: <b>~a</b> (data time: ~a)</b>")
 
+
+
 ;; same using <span> instead of <b>   <span style='color:orange;'>~a</span>
 (defconstant +header-format-string-colored+ "Getting process data from <span style='color:red;'>~a</span>, sorting by <span style='color:orange;'>~a</span><br>Total memory: <span style='color:green;'>~a</span>, #of cpus: <span style='color:blue;'>~a</span> (data collected ~a ago)</b>")
 
@@ -82,9 +84,17 @@
 (defparameter *elapsed-time-format-string* "~#[UNDEF~;~d seconds~;~a and ~a~:;~a, ~a~]~#[~; and ~a~:;, ~a, etc~].")
 
 ;; -------------------------------------------------------------------
+(defun my-time-stamp (universal-time)
+  (multiple-value-bind (sec min hour day month year)
+      (decode-universal-time universal-time)
+    (declare (ignorable sec min hour))
+    (format nil "~2,'0d-~2,'0d-~d" day month year)))
+
 ;; set to t to get additional debug messages
 (defparameter *debug*             nil)
-(defparameter *version*           "0.5f (31-07-2026 afternoon)")
+
+(eval-when (:COMPILE-TOPLEVEL :LOAD-TOPLEVEL :EXECUTE)
+  (defparameter *version*           (format nil "0.5g (~a)" (my-time-stamp (get-universal-time)))))
 
 (defun test-read-tsv (&optional (fname "zbxtop.tsv"))
   (with-open-file      (in fname :direction :input)
@@ -185,15 +195,18 @@
     (format nil +time-diff-as-days-hours-minutes-format-string+ 
             ndays nhours nminutes nseconds)))
 
-;;(time-diff-as-fancy-string 50000)
+;;(probe-file nil)
 
+;;(time-diff-as-fancy-string 50000)
+;; FIXME: when filename is nil!!
 (defun recent-file-exists-p (filename &optional (max-recent-time-diff *recent-file-limit*))
-  (and (probe-file filename)
-       (let ((now (get-universal-time))
-             (file-modif-time (cl:file-write-date filename)))
-         (let ((diff (- now file-modif-time)))
-           (when (< diff max-recent-time-diff)
-             diff)))))
+  (when filename
+    (and (probe-file filename)
+         (let ((now (get-universal-time))
+               (file-modif-time (cl:file-write-date filename)))
+           (let ((diff (- now file-modif-time)))
+             (when (< diff max-recent-time-diff)
+               diff))))))
 
 ;; -----------------------------------------------------------------------
 ;; generic function machinery 
@@ -212,7 +225,7 @@
 (defmethod field-severity-threshold ((field (eql :pmem)) (level (eql :high)))		4.0)
 ;(field-severity-threshold :pmem :high)
 
-*;; FIXME: put a macro expanded ??
+;; FIXME: put a macro expanded ??
 (defun field-value-bgcolor (field value)
   (cond
    ((> value (field-severity-threshold field :high))         "red")
@@ -255,7 +268,7 @@
           (fmt +header-format-string-colored+
                ip criterion memory ncores timestamp))
  
-         (:body
+-         (:body
           (:table :border 0 :cellpadding 4
            (loop :for line-data :in table
                  :for i         :upfrom 0
@@ -289,21 +302,27 @@
 ;(my-time-stamp (file-write-date "/tmp/out.html"))
 
 ;; FIXME: bother about TZ maybe
-(defun my-time-stamp (universal-time)
+(defun my-time-stamp--full (universal-time)
   (multiple-value-bind (sec min hour day month year)
       (decode-universal-time universal-time)
     (format nil "~2,'0d-~2,'0d-~d ~2,'0d:~2,'0d:~2,'0d" day month year hour min sec)))
+
+
 
 (defun my-time-diff (file-write-date-ut)
   (let ((time-diff (- (get-universal-time) file-write-date-ut)))
     (time-diff-as-fancy-string time-diff)))
 
+;; FIXME
 (defun find-recent-tsv-file (&optional (data-dir *data-dir*))
   (let ((pattern (lw:string-append (pathname-utils:unix-namestring data-dir) "*.tsv")))
     ;; FIXME: make sure the most recent one gets selected !!
-    ;; apparently it does !!
-    (lw:when-let (found (directory pattern))
-      (first found))))
+    ;; apparently it does ! => no
+    (lw:when-let (pathnames (sort (directory pattern)
+                              #'(lambda (pn1 pn2)
+                                  (> (file-write-date pn1)
+                                     (file-write-date pn2)))))
+      (first pathnames))))
 
 (defun find-criterion-from-pn (tsv-file-pathname)
   (nth 1 (split-sequence #\_ (pathname-name tsv-file-pathname))))
@@ -339,15 +358,17 @@
     (mp:unschedule-timer *timer*)
     (setq *timer* nil)))
 
-;;
+;; ------------------------------------------------------------------------------
+;; TESTS
+
 ;;(mp:timer-name *timer*)
-;;
+;;(sort (directory "/var/tmp/zbxtop/*.tsv") (lambda (pn1 pn2) (> (file-write-date pn1) (file-write-date pn2))))
+
 
 ;; ------------------------------------------------------------------------------
 ;; MAIN 
 ;(schedule-parsing-and-generation)
 ;(unschedule-parsing-and-generation)
-
-;; ------------------------------------------------------------------------------
+;(mapcar #'file-write-date (directory "/var/tmp/zbxtop/*.tsv"))
 
 
