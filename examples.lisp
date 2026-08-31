@@ -57,15 +57,15 @@
 
 (defparameter *main-ip*       		"127.0.0.1") ;; TO BE VERBESSERT
 
-(defconstant +header-format-string-bold+ "Getting process data from <b>~a</b>, sorting by <b>~a</b><br>Total memory: <b>~a</b>, #of cpus: <b>~a</b> (data time: ~a)</b>")
-
-
+(defconstant +header-format-string-bold+ 
+  "Getting process data from <b>~a</b>, sorting by <b>~a</b><br>Total memory: <b>~a</b>, #of cpus: <b>~a</b> (data time: ~a)</b>")
 
 ;; same using <span> instead of <b>   <span style='color:orange;'>~a</span>
-(defconstant +header-format-string-colored+ "Getting process data from <span style='color:red;'>~a</span>, sorting by <span style='color:orange;'>~a</span><br>Total memory: <span style='color:green;'>~a</span>, #of cpus: <span style='color:blue;'>~a</span> (data collected ~a ago)</b>")
+(defconstant +header-format-string-colored+
+  "Getting process data from <span style='color:red;'>~a</span>, sorting by <span style='color:orange;'>~a</span><br>Total memory: <span style='color:green;'>~a</span>, #of cpus: <span style='color:blue;'>~a</span> (data collected ~a ago)</b>")
 
 ;; from PCL
-(defparameter *list-etc* "~#[NONE~;~a~;~a and ~a~:;~a, ~a~]~#[~; and ~a~:;, ~a, etc~].")
+(defparameter *list-etc* "#[NONE~;~a~;~a and ~a~:;~a, ~a~]~#[~; and ~a~:;, ~a, etc~].")
 
 ;;; and then use it like this:
 
@@ -84,17 +84,17 @@
 (defparameter *elapsed-time-format-string* "~#[UNDEF~;~d seconds~;~a and ~a~:;~a, ~a~]~#[~; and ~a~:;, ~a, etc~].")
 
 ;; -------------------------------------------------------------------
+(eval-when (:COMPILE-TOPLEVEL :LOAD-TOPLEVEL :EXECUTE)
 (defun my-time-stamp (universal-time)
   (multiple-value-bind (sec min hour day month year)
       (decode-universal-time universal-time)
     (declare (ignorable sec min hour))
-    (format nil "~2,'0d-~2,'0d-~d" day month year)))
+    (format nil "~2,'0d-~2,'0d-~d" day month year))))
 
 ;; set to t to get additional debug messages
 (defparameter *debug*             nil)
 
-(eval-when (:COMPILE-TOPLEVEL :LOAD-TOPLEVEL :EXECUTE)
-  (defparameter *version*           (format nil "0.5g (~a)" (my-time-stamp (get-universal-time)))))
+(defparameter *version*           "31-07-2026 (wip)")
 
 (defun test-read-tsv (&optional (fname "zbxtop.tsv"))
   (with-open-file      (in fname :direction :input)
@@ -155,33 +155,44 @@
 (defconstant +seconds-in-one-hour+	(* 60 60))
 (defconstant +seconds-in-a-day+		(* +seconds-in-one-hour+ 24))
 
-;; FIXME: avoid repeating the pattern 4 times ...
 (defun time-diff-as-days-hours-minutes (time-diff)
   (let* ((rem time-diff)
-        (ndays (floor (/ rem +seconds-in-a-day+))))
+         (ndays (floor (/ rem +seconds-in-a-day+))))
 
-    (let* ((rem (- rem (* ndays +seconds-in-a-day+)))
-          (nhours (floor (/ rem +seconds-in-one-hour+))))
+    (let* ((rem (- rem
+                   (* ndays +seconds-in-a-day+)))
+           (nhours (floor (/ rem +seconds-in-one-hour+))))
 
-      (let* ((rem (- rem (* nhours +seconds-in-one-hour+)))
-            (nminutes (floor (/ rem +seconds-in-one-minute+))))
+      (let* ((rem (- rem
+                     (* nhours +seconds-in-one-hour+)))
+             (nminutes (floor (/ rem +seconds-in-one-minute+))))
 
-        (let* ((nseconds (- rem (* nminutes +seconds-in-one-minute+))))
-
+        (let* ((nseconds (- rem
+                            (* nminutes +seconds-in-one-minute+))))
+                            
           (values ndays nhours nminutes nseconds))))))
 
-;; pour faire ca sous forme de loop 
-;; td-ini siad => d
-;; rem  siah => h
+;(time-diff-as-days-hours-minutes 59) => (0 0 0 59)
+;(time-diff-as-days-hours-minutes 3600)
 
-;; SOMething along these lines ??
+;; BUGGED : DON'T USE !! don't know if easily faisible in one loop!
 (defun time-diff-as-days-hours-minutes-as-loop (time-diff)
-  (let ((accu (list))
-        (tmp nil))
-    (declare (ignorable accu tmp))
-    (loop :for seconds-in-unit :in '(86400 3600 60 1)
-          :for seconds-left = time-diff then (- seconds-left (* seconds-in-unit))
-          collect (floor (/ seconds-left seconds-in-unit)))))
+  (loop :for seconds-in-unit :in '(86400 3600 60 1)
+        :for rem = time-diff :then (- rem
+                                      (* seconds-in-unit n-units))
+        :for n-units = (if (= seconds-in-unit 1)
+                           ;; special last case for seconds
+                           (- rem
+                              (* n-units 60)) ;; SEEMS CORRECT WITH 59 in place of 60 ??
+                         ;; general case
+                         (floor (/ rem seconds-in-unit)))
+        :collect n-units))
+
+;(time-diff-as-days-hours-minutes-as-loop 3600)
+
+;; the bug is that for last value, its a '-' not a floor/
+;(time-diff-as-days-hours-minutes-as-loop 62)
+;(time-diff-as-days-hours-minutes-as-loop 239)
 
 ; HERE we have to define a fancy format string to express time-diff
 ;; not displaying days or seconds when 
@@ -193,9 +204,7 @@
 (defun time-diff-as-fancy-string (time-diff) ;; in seconds
   (multiple-value-bind (ndays nhours nminutes nseconds) (time-diff-as-days-hours-minutes time-diff)
     (format nil +time-diff-as-days-hours-minutes-format-string+ 
-            ndays nhours nminutes nseconds)))
-
-;;(probe-file nil)
+                ndays nhours nminutes nseconds)))
 
 ;;(time-diff-as-fancy-string 50000)
 ;; FIXME: when filename is nil!!
@@ -216,9 +225,9 @@
 (defgeneric field-severity-threshold (field level)
   (:documentation "returns the threshold value for given filed (eg 'pmem') and severity level"))
 
-(defmethod field-severity-threshold ((field t)		(level (eql :warning)))		999999999.0)
+(defmethod field-severity-threshold ((field t)		(level (eql :warning)))		999999997.0)
 (defmethod field-severity-threshold ((field t)		(level (eql :average)))		999999998.0)
-(defmethod field-severity-threshold ((field t)		(level (eql :high)))		999999997.0)
+(defmethod field-severity-threshold ((field t)		(level (eql :high)))		999999999.0)
 
 (defmethod field-severity-threshold ((field (eql :pmem)) (level (eql :warning)))	1.0)
 (defmethod field-severity-threshold ((field (eql :pmem)) (level (eql :average)))	2.0)
@@ -253,7 +262,6 @@
 ;; -----------------------------------------------------------------------------------
 ;; works, sort of, sauf que ca colorise 
 ;; and here we are, we have to figure again which field we are processing
-
 (defun fdf-cb (file-name fdf-handle)
   (declare (ignore fdf-handle))
   (format *terminal-io* "~& fdf-cb called file-name='~a' ~%" file-name))
@@ -294,9 +302,14 @@
                                                       ;; else
                                                       *default-bgcolor*)
                                        (if (zerop i)
-                                           (fmt "<b>~a</b>" item) ;; FIXME: more elegant
-                                         (fmt "~a" item)))) ))))))))))))
+                                           ;; (fmt "<b>~a</b>" item)
 
+                                           ;; TBD : activate sort by column !!
+                                           (htm (:a :href "/tmp/tbd.html"
+                                                 (:b (fmt "~a" item))))
+                                         ; else
+                                            (fmt "~a" item))))))))))))))))
+ 
 ;(write-html-table :outfn "/tmp/out.html" :table *table* :ip "10.23.8.10")
 
 ;(my-time-stamp (file-write-date "/tmp/out.html"))
@@ -306,8 +319,6 @@
   (multiple-value-bind (sec min hour day month year)
       (decode-universal-time universal-time)
     (format nil "~2,'0d-~2,'0d-~d ~2,'0d:~2,'0d:~2,'0d" day month year hour min sec)))
-
-
 
 (defun my-time-diff (file-write-date-ut)
   (let ((time-diff (- (get-universal-time) file-write-date-ut)))
@@ -363,7 +374,6 @@
 
 ;;(mp:timer-name *timer*)
 ;;(sort (directory "/var/tmp/zbxtop/*.tsv") (lambda (pn1 pn2) (> (file-write-date pn1) (file-write-date pn2))))
-
 
 ;; ------------------------------------------------------------------------------
 ;; MAIN 
